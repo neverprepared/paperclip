@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go mod init:*)",
+      "Bash(go build:*)",
+      "Bash(./paperclip:*)",
+      "Bash(cat:*)",
+      "Bash(pkill:*)",
+      "Bash(# Clean up any existing processes pkill -f paperclip sleep 1 # Start two peers on different ports echo \"\"=== Starting Peer A \\(port 9998\\) ===\"\" ./paperclip -v -port 9998 -peers \"\"localhost:9999\"\" 2>&1 & PID_A=$! echo \"\"=== Starting Peer B \\(port 9999\\) ===\"\" ./paperclip -v -port 9999 -peers \"\"localhost:9998\"\" 2>&1 & PID_B=$! sleep 2 # Check connections echo \"\"\"\" echo \"\"=== Peer A Log ===\"\" cat /tmp/peer_a.log echo \"\"\"\" echo \"\"=== Peer B Log ===\"\" cat /tmp/peer_b.log # Now copy text to clipboard and see if both detect it echo \"\"\"\" echo \"\"=== Copying ''Hello from test!'' to clipboard ===\"\" echo \"\"Hello from test!\"\")",
+      "Bash(plutil:*)",
+      "Bash(launchctl list:*)",
+      "Bash(git init:*)",
+      "Bash(git remote add:*)",
+      "Bash(git add:*)"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "atlassian",
+    "git",
+    "github",
+    "microsoft-docs",
+    "azure",
+    "azure-devops",
+    "markitdown",
+    "sql-server",
+    "playwright",
+    "devbox",
+    "azure-ai-foundry",
+    "m365-agents"
+  ]
+}
