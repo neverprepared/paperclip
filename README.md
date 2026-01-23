@@ -1,26 +1,32 @@
 # Paperclip
 
-A peer-to-peer clipboard synchronization tool for macOS. Automatically syncs clipboard content (text and images) between multiple machines over TCP.
+A peer-to-peer clipboard synchronization tool for macOS and Windows. Automatically syncs clipboard content (text and images) between multiple machines over TCP.
 
 ## Features
 
+- Cross-platform: macOS and Windows support
 - Syncs text and images between peers
 - Supports multiple addresses per peer (e.g., LAN + Tailscale)
 - Automatic reconnection with exponential backoff
 - Echo prevention to avoid clipboard loops
-- Runs as a background service via launchd
+- Runs as a background service (launchd on macOS, Task Scheduler on Windows)
+- Zero external dependencies
 
 ## Installation
 
+### From Source
+
 ```bash
+# macOS
 go build -o paperclip .
+
+# Windows
+GOOS=windows GOARCH=amd64 go build -o paperclip.exe .
 ```
 
-Optionally, install to your PATH:
+### From Releases
 
-```bash
-cp paperclip ~/bin/
-```
+Download the latest binary from the [Releases](https://github.com/mindmorass/paperclip/releases) page.
 
 ## Usage
 
@@ -46,7 +52,7 @@ cp paperclip ~/bin/
 | `-poll` | 500 | Clipboard poll interval in milliseconds |
 | `-v` | false | Enable verbose logging |
 | `-version` | false | Show version |
-| `-launchd` | false | Generate and install launchd plist |
+| `-service` | false | Generate and install platform service config |
 
 ### Peer Address Format
 
@@ -63,67 +69,153 @@ Peers are specified as comma-separated addresses. You can also use pipe (`|`) to
 -peers "192.168.1.100:9999|100.64.0.5:9999,other-machine:9999"
 ```
 
-## Running as a Service (launchd)
+## Running as a Service
 
-### Generate and Install the plist
+### macOS (launchd)
+
+#### Generate and Install
 
 ```bash
-./paperclip -launchd -port 9999 -peers "peer1:9999,peer2:9999"
+./paperclip -service -port 9999 -peers "peer1:9999,peer2:9999"
 ```
 
 This writes the plist file to `~/Library/LaunchAgents/com.github.mindmorass.paperclip.plist`.
 
-### Load the Service
+#### Load the Service
 
 ```bash
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.github.mindmorass.paperclip.plist
 ```
 
-### Unload the Service
+#### Unload the Service
 
 ```bash
 launchctl bootout gui/$(id -u)/com.github.mindmorass.paperclip
 ```
 
-### Reload After Config Changes
+#### Reload After Config Changes
 
 ```bash
 launchctl bootout gui/$(id -u)/com.github.mindmorass.paperclip
-./paperclip -launchd -port 9999 -peers "updated-peers:9999"
+./paperclip -service -port 9999 -peers "updated-peers:9999"
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.github.mindmorass.paperclip.plist
 ```
 
-### View Logs
+#### View Logs
 
 ```bash
-# Standard output
 tail -f ~/Library/Logs/paperclip.log
-
-# Standard error
 tail -f ~/Library/Logs/paperclip.err
 ```
 
-### Check Service Status
+#### Check Service Status
 
 ```bash
 launchctl list | grep paperclip
+```
+
+### Windows (Task Scheduler)
+
+#### Generate and Install
+
+```powershell
+.\paperclip.exe -service -port 9999 -peers "peer1:9999,peer2:9999"
+```
+
+This creates a scheduled task named "Paperclip" that runs at user logon.
+
+**Note:** No administrator privileges are required for per-user tasks.
+
+#### Start Immediately
+
+```powershell
+schtasks /Run /TN Paperclip
+```
+
+#### Stop the Service
+
+```powershell
+schtasks /End /TN Paperclip
+```
+
+#### Check Status
+
+```powershell
+schtasks /Query /TN Paperclip
+```
+
+#### Remove the Service
+
+```powershell
+schtasks /Delete /TN Paperclip /F
+```
+
+#### Update Configuration
+
+```powershell
+# Remove and recreate with new settings
+schtasks /Delete /TN Paperclip /F
+.\paperclip.exe -service -port 9999 -peers "updated-peers:9999"
+schtasks /Run /TN Paperclip
 ```
 
 ## Example Setup
 
 ### Two Machines (A and B)
 
-On Machine A:
+On Machine A (macOS):
 ```bash
 ./paperclip -v -port 9999 -peers "machine-b.local:9999"
 ```
 
-On Machine B:
-```bash
-./paperclip -v -port 9999 -peers "machine-a.local:9999"
+On Machine B (Windows):
+```powershell
+.\paperclip.exe -v -port 9999 -peers "machine-a.local:9999"
 ```
 
 Copy something to the clipboard on either machine - it will automatically appear on the other.
+
+### Cross-Platform Network
+
+```
+macOS Laptop  <---->  Windows Desktop  <---->  macOS Mini
+     :9999                 :9999                  :9999
+```
+
+Each machine connects to the others. The mesh topology ensures clipboard content propagates to all peers.
+
+## Platform Notes
+
+### macOS
+- Uses `pbpaste`/`pbcopy` for text
+- Uses AppleScript with NSPasteboard for images (PNG)
+- Images are converted to PNG for cross-platform compatibility
+
+### Windows
+- Uses Win32 clipboard APIs via syscalls (no CGO required)
+- Supports CF_UNICODETEXT for text (UTF-16LE)
+- Supports CF_PNG and CF_DIB for images
+- Task Scheduler runs in user session (required for clipboard access)
+
+## Building
+
+### macOS (Apple Silicon)
+
+```bash
+CGO_ENABLED=0 go build -ldflags="-s -w" -o paperclip .
+```
+
+### Windows (64-bit)
+
+```bash
+GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o paperclip.exe .
+```
+
+### Windows (32-bit)
+
+```bash
+GOOS=windows GOARCH=386 go build -ldflags="-s -w" -o paperclip.exe .
+```
 
 ## GitHub Actions
 
