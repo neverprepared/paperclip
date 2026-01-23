@@ -6,9 +6,12 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
+	"github.com/flynn/noise"
 	"github.com/mindmorass/paperclip/clipboard"
+	"github.com/mindmorass/paperclip/crypto"
 	"github.com/mindmorass/paperclip/peer"
 )
 
@@ -59,8 +62,35 @@ func runDaemon(config Config) {
 		logger.SetOutput(os.Stderr)
 	}
 
+	// Check if any peer uses noise: prefix
+	usesCrypto := strings.Contains(config.Peers, "noise:")
+
+	var identity noise.DHKey
+	var knownHosts *crypto.KnownHosts
+
+	if usesCrypto {
+		// Initialize crypto
+		configDir, err := crypto.GetConfigDir()
+		if err != nil {
+			logger.Fatalf("Failed to get config directory: %v", err)
+		}
+
+		identity, err = crypto.LoadOrCreateIdentity(configDir)
+		if err != nil {
+			logger.Fatalf("Failed to load/create identity: %v", err)
+		}
+
+		knownHosts, err = crypto.LoadKnownHosts(configDir)
+		if err != nil {
+			logger.Fatalf("Failed to load known_hosts: %v", err)
+		}
+
+		logger.Printf("Local public key: %s", crypto.PublicKeyFull(identity.Public))
+		logger.Printf("Fingerprint: %s", crypto.PublicKeyFingerprint(identity.Public))
+	}
+
 	cb := clipboard.New(logger)
-	node := peer.NewNode(config.Port, config.Peers, cb, logger, config.Verbose)
+	node := peer.NewNode(config.Port, config.Peers, cb, logger, config.Verbose, identity, knownHosts)
 
 	// Handle graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -74,6 +104,9 @@ func runDaemon(config Config) {
 	}()
 
 	logger.Printf("Starting paperclip on port %d\n", config.Port)
+	if usesCrypto {
+		logger.Printf("Encryption enabled for noise: prefixed peers")
+	}
 	if err := node.Start(config.PollMs); err != nil {
 		logger.Fatalf("Failed to start: %v", err)
 	}
