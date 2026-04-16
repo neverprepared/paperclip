@@ -69,6 +69,11 @@ func (c *Clipboard) writeText(data []byte) error {
 	return cmd.Run()
 }
 
+// maxImageBytes caps the clipboard image size we will accept (16 MB).
+// Images larger than this are silently ignored to prevent OOM during
+// TIFF→PNG conversion of arbitrarily large clipboard contents.
+const maxImageBytes = 16 * 1024 * 1024
+
 func (c *Clipboard) readImage() ([]byte, error) {
 	// Use osascript to get clipboard as PNG data (convert from TIFF if needed)
 	// macOS clipboard often stores images as TIFF, so we convert to PNG for portability
@@ -109,6 +114,10 @@ return (imgData's base64EncodedStringWithOptions:0) as text`
 	decoded, err := base64.StdEncoding.DecodeString(string(output))
 	if err != nil {
 		return nil, err
+	}
+
+	if len(decoded) > maxImageBytes {
+		return nil, fmt.Errorf("image too large (%d bytes, max %d)", len(decoded), maxImageBytes)
 	}
 	return decoded, nil
 }
