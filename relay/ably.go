@@ -21,8 +21,8 @@ import (
 
 const replayWindowSeconds = 5 * 60 // ±5 minutes
 
-// RoomStatus represents the state of a single relay room.
-type RoomStatus struct {
+// ClipboardStatus represents the state of a single relay room.
+type ClipboardStatus struct {
 	Name      string
 	Connected bool
 	Encrypted bool
@@ -92,7 +92,7 @@ type roomSub struct {
 func New(apiKey string, roomNames []string, cb *clipboard.Clipboard, logger *log.Logger, verbose bool) (*Relay, error) {
 	if verbose {
 		logger.Printf("Ably key: [configured]")
-		logger.Printf("Ably rooms: %v", roomNames)
+		logger.Printf("Ably clipboards: %v", roomNames)
 	}
 
 	client, err := ably.NewRealtime(
@@ -113,16 +113,16 @@ func New(apiKey string, roomNames []string, cb *clipboard.Clipboard, logger *log
 		// Passphrase is required — skip rooms without one.
 		if passphrase, err := GetPassphrase(name); err == nil && passphrase != "" {
 			room.encKey = deriveKey(passphrase, name)
-			logger.Printf("Encryption enabled for room '%s'", name)
+			logger.Printf("Encryption enabled for clipboard '%s'", name)
 			rooms = append(rooms, room)
 		} else {
-			logger.Printf("WARNING: No passphrase for room '%s' — skipping (encryption is required)", name)
+			logger.Printf("WARNING: No passphrase for clipboard '%s' — skipping (encryption is required)", name)
 		}
 	}
 
 	if len(rooms) == 0 {
 		client.Close()
-		return nil, fmt.Errorf("no rooms with passphrases configured — encryption is required")
+		return nil, fmt.Errorf("no clipboards with passphrases configured — encryption is required")
 	}
 
 	senderBytes := make([]byte, 16)
@@ -155,9 +155,9 @@ func (r *Relay) Start(pollMs int) error {
 			r.handleMessage(rm, msg)
 		})
 		if err != nil {
-			return fmt.Errorf("failed to subscribe to room %s: %w", room.name, err)
+			return fmt.Errorf("failed to subscribe to clipboard %s: %w", room.name, err)
 		}
-		r.logger.Printf("Ably relay connected (room: %s)", room.name)
+		r.logger.Printf("Ably relay connected (clipboard: %s)", room.name)
 	}
 
 	r.wg.Add(1)
@@ -180,11 +180,11 @@ func (r *Relay) Connected() bool {
 }
 
 // Status returns the status of each room.
-func (r *Relay) Status() []RoomStatus {
+func (r *Relay) Status() []ClipboardStatus {
 	connected := r.Connected()
-	statuses := make([]RoomStatus, len(r.rooms))
+	statuses := make([]ClipboardStatus, len(r.rooms))
 	for i, room := range r.rooms {
-		statuses[i] = RoomStatus{
+		statuses[i] = ClipboardStatus{
 			Name:      room.name,
 			Connected: connected,
 			Encrypted: room.encKey != nil,
@@ -193,8 +193,8 @@ func (r *Relay) Status() []RoomStatus {
 	return statuses
 }
 
-// RoomNames returns the names of all rooms.
-func (r *Relay) RoomNames() []string {
+// ClipboardNames returns the names of all rooms.
+func (r *Relay) ClipboardNames() []string {
 	names := make([]string, len(r.rooms))
 	for i, room := range r.rooms {
 		names[i] = room.name
@@ -220,11 +220,11 @@ func (r *Relay) handleMessage(room *roomSub, msg *ably.Message) {
 
 	// Verify HMAC — rejects injected messages from parties without the key.
 	if room.encKey == nil {
-		r.logger.Printf("ERROR: received message for room '%s' with no encryption key — dropping", room.name)
+		r.logger.Printf("ERROR: received message for clipboard '%s' with no encryption key — dropping", room.name)
 		return
 	}
 	if !verifyMAC(room.encKey, amsg) {
-		r.logger.Printf("HMAC verification failed for room '%s' — dropping message", room.name)
+		r.logger.Printf("HMAC verification failed for clipboard '%s' — dropping message", room.name)
 		return
 	}
 
@@ -237,13 +237,13 @@ func (r *Relay) handleMessage(room *roomSub, msg *ably.Message) {
 	// Decrypt — room name is AAD to prevent cross-room replay.
 	decrypted, err := decrypt(room.encKey, raw, []byte(room.name))
 	if err != nil {
-		r.logger.Printf("Failed to decrypt message from room '%s': %v", room.name, err)
+		r.logger.Printf("Failed to decrypt message from clipboard '%s': %v", room.name, err)
 		return
 	}
 
 	// Extract and validate the 8-byte timestamp prepended by the sender.
 	if len(decrypted) < 8 {
-		r.logger.Printf("Decrypted payload too short from room '%s' — dropping", room.name)
+		r.logger.Printf("Decrypted payload too short from clipboard '%s' — dropping", room.name)
 		return
 	}
 	msgTs := int64(binary.BigEndian.Uint64(decrypted[:8]))
@@ -254,7 +254,7 @@ func (r *Relay) handleMessage(room *roomSub, msg *ably.Message) {
 		delta = -delta
 	}
 	if delta > replayWindowSeconds {
-		r.logger.Printf("Replay rejected for room '%s': message timestamp drift %ds exceeds %ds window", room.name, delta, replayWindowSeconds)
+		r.logger.Printf("Replay rejected for clipboard '%s': message timestamp drift %ds exceeds %ds window", room.name, delta, replayWindowSeconds)
 		return
 	}
 
@@ -279,7 +279,7 @@ func (r *Relay) handleMessage(room *roomSub, msg *ably.Message) {
 		if content.Type == clipboard.TypeImage {
 			typeStr = "image"
 		}
-		r.logger.Printf("Received %s (%d bytes) via room '%s' (encrypted)", typeStr, len(plaintext), room.name)
+		r.logger.Printf("Received %s (%d bytes) via clipboard '%s' (encrypted)", typeStr, len(plaintext), room.name)
 	}
 }
 
@@ -309,7 +309,7 @@ func (r *Relay) pollAndPublish(interval time.Duration) {
 			for _, room := range r.rooms {
 				// Encrypt — mandatory, refuse to publish if no key.
 				if room.encKey == nil {
-					r.logger.Printf("ERROR: room '%s' has no encryption key — refusing to publish", room.name)
+					r.logger.Printf("ERROR: clipboard '%s' has no encryption key — refusing to publish", room.name)
 					continue
 				}
 
@@ -322,7 +322,7 @@ func (r *Relay) pollAndPublish(interval time.Duration) {
 				// Room name as AAD binds ciphertext to this room.
 				ciphertext, err := encrypt(room.encKey, payload, []byte(room.name))
 				if err != nil {
-					r.logger.Printf("Failed to encrypt for room '%s': %v", room.name, err)
+					r.logger.Printf("Failed to encrypt for clipboard '%s': %v", room.name, err)
 					continue
 				}
 
@@ -335,13 +335,13 @@ func (r *Relay) pollAndPublish(interval time.Duration) {
 
 				msgJSON, err := json.Marshal(amsg)
 				if err != nil {
-					r.logger.Printf("Failed to marshal message for room '%s': %v", room.name, err)
+					r.logger.Printf("Failed to marshal message for clipboard '%s': %v", room.name, err)
 					continue
 				}
 
 				err = room.channel.Publish(r.ctx, "clipboard", string(msgJSON))
 				if err != nil {
-					r.logger.Printf("Failed to publish to room %s: %v", room.name, err)
+					r.logger.Printf("Failed to publish to clipboard %s: %v", room.name, err)
 				} else {
 					r.recordSync()
 				}
@@ -350,7 +350,7 @@ func (r *Relay) pollAndPublish(interval time.Duration) {
 					if content.Type == clipboard.TypeImage {
 						typeStr = "image"
 					}
-					r.logger.Printf("Published %s (%d bytes) to room '%s' (encrypted)", typeStr, len(content.Data), room.name)
+					r.logger.Printf("Published %s (%d bytes) to clipboard '%s' (encrypted)", typeStr, len(content.Data), room.name)
 				}
 			}
 		}

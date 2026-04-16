@@ -38,9 +38,9 @@ func installLaunchAgent(cfg *config.Config) error {
 		return err
 	}
 
-	// Build room names for --ably-room flag.
+	// Build clipboard names for --clipboard flag.
 	var roomNames []string
-	for _, r := range cfg.Relay.EnabledRooms() {
+	for _, r := range cfg.Relay.EnabledClipboards() {
 		roomNames = append(roomNames, r.Name)
 	}
 
@@ -57,7 +57,7 @@ func installLaunchAgent(cfg *config.Config) error {
         <string>%s</string>
         <string>-poll</string>
         <string>%d</string>
-        <string>-ably-room</string>
+        <string>-clipboard</string>
         <string>%s</string>
     </array>
     <key>RunAtLoad</key>

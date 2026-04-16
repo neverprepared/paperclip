@@ -84,7 +84,7 @@ func TestVerifyMACEmptyMAC(t *testing.T) {
 }
 
 func TestMACDifferentRoomKeys(t *testing.T) {
-	// Same message, same passphrase — different room keys must produce different MACs.
+	// Same message, same passphrase — different clipboard keys must produce different MACs.
 	keyA := deriveKey("passphrase", "room-a")
 	keyB := deriveKey("passphrase", "room-b")
 	msg := ablyMsg{Type: 0, Data: "abc123", Sender: "42"}
@@ -93,7 +93,7 @@ func TestMACDifferentRoomKeys(t *testing.T) {
 	macB := computeMAC(keyB, msg)
 
 	if macA == macB {
-		t.Error("expected different room keys to produce different MACs")
+		t.Error("expected different clipboard keys to produce different MACs")
 	}
 }
 

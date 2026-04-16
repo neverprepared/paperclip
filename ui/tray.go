@@ -99,15 +99,15 @@ func (s *trayState) build() {
 	}
 	var entries []roomEntry
 
-	statuses := map[string]relay.RoomStatus{}
+	statuses := map[string]relay.ClipboardStatus{}
 	if r != nil {
 		for _, st := range r.Status() {
 			statuses[st.Name] = st
 		}
 	}
 
-	if len(cfg.Relay.Rooms) == 0 {
-		mSetup := systray.AddMenuItem("⚠  Configure Paperclip...", "Set up your API key and first room")
+	if len(cfg.Relay.Clipboards) == 0 {
+		mSetup := systray.AddMenuItem("⚠  Configure Paperclip...", "Set up your API key and first clipboard")
 		go func() {
 			select {
 			case <-ctx.Done():
@@ -119,11 +119,11 @@ func (s *trayState) build() {
 			}
 		}()
 	} else {
-		for i, room := range cfg.Relay.Rooms {
-			st := statuses[room.Name]
-			hasPass := relay.HasPassphrase(room.Name)
+		for i, cb := range cfg.Relay.Clipboards {
+			st := statuses[cb.Name]
+			hasPass := relay.HasPassphrase(cb.Name)
 
-			mRoom := systray.AddMenuItem(roomMenuLabel(room.Name, st, hasPass, r != nil), "")
+			mRoom := systray.AddMenuItem(clipboardMenuLabel(cb.Name, st, hasPass, r != nil), "")
 
 			// Connection status sub-item
 			connLabel := "  ○  Not connected"
@@ -140,11 +140,11 @@ func (s *trayState) build() {
 			if hasPass {
 				passLabel = "Change Passphrase..."
 			}
-			mPass := mRoom.AddSubMenuItem(passLabel, "Set encryption passphrase for this room")
-			mRemove := mRoom.AddSubMenuItem(fmt.Sprintf("Remove \"%s\"", room.Name), "Remove this room")
+			mPass := mRoom.AddSubMenuItem(passLabel, "Set encryption passphrase for this clipboard")
+			mRemove := mRoom.AddSubMenuItem(fmt.Sprintf("Remove \"%s\"", cb.Name), "Remove this clipboard")
 
 			entries = append(entries, roomEntry{
-				name:         room.Name,
+				name:         cb.Name,
 				cfgIdx:       i,
 				passphraseCh: mPass.ClickedCh,
 				removeCh:     mRemove.ClickedCh,
@@ -153,7 +153,7 @@ func (s *trayState) build() {
 	}
 
 	systray.AddSeparator()
-	mAddRoom := systray.AddMenuItem("  Add Room...", "Add a new sync room")
+	mAddRoom := systray.AddMenuItem("  Add Clipboard...", "Add a new sync clipboard")
 	mSetKey := systray.AddMenuItem("  Set API Key...", "Update your Ably API key")
 
 	systray.AddSeparator()
@@ -176,7 +176,7 @@ func (s *trayState) build() {
 					if !ok {
 						return
 					}
-					pass := promptPassphrase(fmt.Sprintf("Enter passphrase for room \"%s\".\nAll devices sharing this room must use the same passphrase.", e.name))
+					pass := promptPassphrase(fmt.Sprintf("Enter passphrase for clipboard \"%s\".\nAll devices sharing this clipboard must use the same passphrase.", e.name))
 					if pass == "" {
 						continue
 					}
@@ -200,12 +200,12 @@ func (s *trayState) build() {
 					if !ok {
 						return
 					}
-					if !promptConfirm("Remove Room", fmt.Sprintf("Remove room \"%s\" and delete its passphrase?", e.name)) {
+					if !promptConfirm("Remove Clipboard", fmt.Sprintf("Remove clipboard \"%s\" and delete its passphrase?", e.name)) {
 						continue
 					}
 					idx := e.cfgIdx
-					if idx >= 0 && idx < len(cfg.Relay.Rooms) {
-						cfg.Relay.Rooms = append(cfg.Relay.Rooms[:idx], cfg.Relay.Rooms[idx+1:]...)
+					if idx >= 0 && idx < len(cfg.Relay.Clipboards) {
+						cfg.Relay.Clipboards = append(cfg.Relay.Clipboards[:idx], cfg.Relay.Clipboards[idx+1:]...)
 					}
 					relay.DeletePassphrase(e.name)
 					if err := config.Save(cfg); err != nil {
@@ -220,7 +220,7 @@ func (s *trayState) build() {
 		}()
 	}
 
-	// Add room
+	// Add clipboard
 	go func() {
 		for {
 			select {
@@ -326,14 +326,14 @@ func (s *trayState) build() {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 func (s *trayState) statusText(r *relay.Relay) string {
-	if len(s.cfg.Relay.Rooms) == 0 {
+	if len(s.cfg.Relay.Clipboards) == 0 {
 		return "⚠  Not configured"
 	}
 	if r == nil {
 		return "○  Not connected"
 	}
 	if r.Connected() {
-		n := len(r.RoomNames())
+		n := len(r.ClipboardNames())
 		if n == 1 {
 			return "●  Connected · 1 room"
 		}
@@ -346,7 +346,7 @@ func (s *trayState) tooltipText(r *relay.Relay) string {
 	if r == nil || !r.Connected() {
 		return "Paperclip — not connected"
 	}
-	rooms := r.RoomNames()
+	rooms := r.ClipboardNames()
 	if len(rooms) == 0 {
 		return "Paperclip — connected"
 	}
@@ -377,7 +377,7 @@ func updateLastSync(r *relay.Relay, item *systray.MenuItem) {
 	item.Show()
 }
 
-func roomMenuLabel(name string, st relay.RoomStatus, hasPass bool, relayRunning bool) string {
+func clipboardMenuLabel(name string, st relay.ClipboardStatus, hasPass bool, relayRunning bool) string {
 	dot := "○"
 	if relayRunning && st.Connected {
 		dot = "●"
@@ -389,7 +389,7 @@ func roomMenuLabel(name string, st relay.RoomStatus, hasPass bool, relayRunning 
 	return label
 }
 
-// runSetupFlow walks a first-run user through API key + first room setup.
+// runSetupFlow walks a first-run user through API key + first clipboard setup.
 func (s *trayState) runSetupFlow() bool {
 	apiKey := promptInput("Welcome to Paperclip", "Enter your Ably API key to get started:", "")
 	if apiKey == "" {
@@ -402,8 +402,8 @@ func (s *trayState) runSetupFlow() bool {
 	return s.runAddRoomFlow()
 }
 
-// runAddRoomFlow prompts for a room name + passphrase, persists both.
-// Returns true if a room was successfully added.
+// runAddRoomFlow prompts for a clipboard name + passphrase, persists both.
+// Returns true if a clipboard was successfully added.
 func (s *trayState) runAddRoomFlow() bool {
 	// Ensure API key exists first.
 	if apiKey, err := relay.GetAPIKey(); err != nil || apiKey == "" {
@@ -417,26 +417,26 @@ func (s *trayState) runAddRoomFlow() bool {
 		}
 	}
 
-	room := strings.TrimSpace(promptInput("Add Room", "Enter a room name (letters, numbers, dash, underscore):", ""))
-	if room == "" {
+	name := strings.TrimSpace(promptInput("Add Clipboard", "Enter a clipboard name (letters, numbers, dash, underscore):", ""))
+	if name == "" {
 		return false
 	}
-	if !validRoomName.MatchString(room) {
-		promptConfirm("Invalid Room Name", "Room name may only contain letters, numbers, - and _.")
+	if !validRoomName.MatchString(name) {
+		promptConfirm("Invalid Clipboard Name", "Clipboard name may only contain letters, numbers, - and _.")
 		return false
 	}
 
-	pass := promptPassphrase(fmt.Sprintf("Set passphrase for \"%s\".\nAll devices sharing this room must use the same passphrase.", room))
+	pass := promptPassphrase(fmt.Sprintf("Set passphrase for clipboard \"%s\".\nAll devices sharing this clipboard must use the same passphrase.", name))
 	if pass == "" {
 		return false
 	}
 
-	if err := relay.SetPassphrase(room, pass); err != nil {
+	if err := relay.SetPassphrase(name, pass); err != nil {
 		promptConfirm("Error", fmt.Sprintf("Failed to save passphrase: %v", err))
 		return false
 	}
 
-	s.cfg.Relay.Rooms = append(s.cfg.Relay.Rooms, config.Room{Name: room, Enabled: true})
+	s.cfg.Relay.Clipboards = append(s.cfg.Relay.Clipboards, config.Clipboard{Name: name, Enabled: true})
 	if err := config.Save(s.cfg); err != nil {
 		promptConfirm("Error", fmt.Sprintf("Failed to save config: %v", err))
 		return false
@@ -447,7 +447,7 @@ func (s *trayState) runAddRoomFlow() bool {
 // promptPassphrase loops until the user enters a valid passphrase or cancels.
 func promptPassphrase(message string) string {
 	for {
-		pass := promptInput("Room Passphrase", message, "")
+		pass := promptInput("Clipboard Passphrase", message, "")
 		if pass == "" {
 			if promptConfirm("Cancel", "No passphrase entered — cancel?") {
 				return ""

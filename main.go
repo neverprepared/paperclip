@@ -23,7 +23,7 @@ func main() {
 		showVer = flag.Bool("version", false, "Show version")
 		verbose = flag.Bool("v", false, "Verbose logging")
 		tray    = flag.Bool("tray", false, "Run with menu bar UI")
-		ablyRoom = flag.String("ably-room", "", "Comma-separated Ably room names")
+		clipboardName = flag.String("clipboard", "", "Comma-separated clipboard names")
 	)
 	flag.Parse()
 
@@ -52,13 +52,13 @@ func main() {
 		}
 	}
 
-	if *ablyRoom != "" {
-		rooms := strings.Split(*ablyRoom, ",")
-		cfg.Relay.Rooms = nil
+	if *clipboardName != "" {
+		rooms := strings.Split(*clipboardName, ",")
+		cfg.Relay.Clipboards = nil
 		for _, r := range rooms {
 			r = strings.TrimSpace(r)
 			if r != "" {
-				cfg.Relay.Rooms = append(cfg.Relay.Rooms, config.Room{Name: r, Enabled: true})
+				cfg.Relay.Clipboards = append(cfg.Relay.Clipboards, config.Clipboard{Name: r, Enabled: true})
 			}
 		}
 	}
@@ -71,17 +71,17 @@ func main() {
 }
 
 func startRelay(cfg *config.Config, apiKey string, cb *clipboard.Clipboard, logger *log.Logger, verbose bool) *relay.Relay {
-	enabledRooms := cfg.Relay.EnabledRooms()
-	if apiKey == "" || len(enabledRooms) == 0 {
+	enabledClipboards := cfg.Relay.EnabledClipboards()
+	if apiKey == "" || len(enabledClipboards) == 0 {
 		return nil
 	}
 
-	var roomNames []string
-	for _, r := range enabledRooms {
-		roomNames = append(roomNames, r.Name)
+	var clipboardNames []string
+	for _, r := range enabledClipboards {
+		clipboardNames = append(clipboardNames, r.Name)
 	}
 
-	r, err := relay.New(apiKey, roomNames, cb, logger, verbose)
+	r, err := relay.New(apiKey, clipboardNames, cb, logger, verbose)
 	if err != nil {
 		logger.Printf("Failed to create relay: %v", err)
 		return nil
@@ -125,7 +125,7 @@ func runDaemon(cfg *config.Config, apiKey string) {
 	r := startRelay(cfg, apiKey, cb, logger, cfg.Verbose)
 
 	if r == nil {
-		logger.Fatal("No relay configured. Set up an Ably API key and rooms via --tray, or set PAPERCLIP_ABLY_KEY.")
+		logger.Fatal("No relay configured. Set up an Ably API key and clipboards via --tray, or set PAPERCLIP_ABLY_KEY.")
 	}
 
 	sigChan := make(chan os.Signal, 1)

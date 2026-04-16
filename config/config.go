@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 )
 
-// Room represents a single relay room
-type Room struct {
+// Clipboard represents a single named sync clipboard
+type Clipboard struct {
 	Name    string `json:"name"`
 	Enabled bool   `json:"enabled"`
 }
@@ -15,18 +15,18 @@ type Room struct {
 // RelayConfig holds Ably relay settings.
 // The API key is stored in the system keychain, not here.
 type RelayConfig struct {
-	Rooms []Room `json:"rooms"`
+	Clipboards []Clipboard `json:"clipboards"`
 }
 
-// EnabledRooms returns only the rooms that are enabled
-func (r *RelayConfig) EnabledRooms() []Room {
-	var rooms []Room
-	for _, room := range r.Rooms {
-		if room.Enabled {
-			rooms = append(rooms, room)
+// EnabledClipboards returns only the clipboards that are enabled
+func (r *RelayConfig) EnabledClipboards() []Clipboard {
+	var out []Clipboard
+	for _, c := range r.Clipboards {
+		if c.Enabled {
+			out = append(out, c)
 		}
 	}
-	return rooms
+	return out
 }
 
 // Config holds the persistent configuration for paperclip

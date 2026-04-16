@@ -15,15 +15,15 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Verbose {
 		t.Error("expected Verbose=false by default")
 	}
-	if len(cfg.Relay.Rooms) != 0 {
-		t.Errorf("expected no rooms by default, got %d", len(cfg.Relay.Rooms))
+	if len(cfg.Relay.Clipboards) != 0 {
+		t.Errorf("expected no clipboards by default, got %d", len(cfg.Relay.Clipboards))
 	}
 }
 
 func TestEnabledRooms(t *testing.T) {
 	cfg := &Config{
 		Relay: RelayConfig{
-			Rooms: []Room{
+			Clipboards: []Clipboard{
 				{Name: "alpha", Enabled: true},
 				{Name: "beta", Enabled: false},
 				{Name: "gamma", Enabled: true},
@@ -31,34 +31,34 @@ func TestEnabledRooms(t *testing.T) {
 		},
 	}
 
-	enabled := cfg.Relay.EnabledRooms()
+	enabled := cfg.Relay.EnabledClipboards()
 	if len(enabled) != 2 {
 		t.Fatalf("expected 2 enabled rooms, got %d", len(enabled))
 	}
 	if enabled[0].Name != "alpha" {
-		t.Errorf("expected first enabled room to be 'alpha', got %q", enabled[0].Name)
+		t.Errorf("expected first enabled clipboard to be 'alpha', got %q", enabled[0].Name)
 	}
 	if enabled[1].Name != "gamma" {
-		t.Errorf("expected second enabled room to be 'gamma', got %q", enabled[1].Name)
+		t.Errorf("expected second enabled clipboard to be 'gamma', got %q", enabled[1].Name)
 	}
 }
 
 func TestEnabledRoomsNone(t *testing.T) {
 	cfg := &Config{
 		Relay: RelayConfig{
-			Rooms: []Room{
+			Clipboards: []Clipboard{
 				{Name: "alpha", Enabled: false},
 			},
 		},
 	}
-	if len(cfg.Relay.EnabledRooms()) != 0 {
+	if len(cfg.Relay.EnabledClipboards()) != 0 {
 		t.Error("expected no enabled rooms")
 	}
 }
 
 func TestEnabledRoomsEmpty(t *testing.T) {
 	cfg := DefaultConfig()
-	if rooms := cfg.Relay.EnabledRooms(); len(rooms) != 0 {
+	if rooms := cfg.Relay.EnabledClipboards(); len(rooms) != 0 {
 		t.Errorf("expected empty enabled rooms, got %d", len(rooms))
 	}
 }
@@ -71,8 +71,8 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		PollMs:  250,
 		Verbose: true,
 		Relay: RelayConfig{
-			Rooms: []Room{
-				{Name: "my-room", Enabled: true},
+			Clipboards: []Clipboard{
+				{Name: "my-clipboard", Enabled: true},
 				{Name: "other", Enabled: false},
 			},
 		},
@@ -93,15 +93,15 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if loaded.Verbose != original.Verbose {
 		t.Errorf("Verbose: got %v, want %v", loaded.Verbose, original.Verbose)
 	}
-	if len(loaded.Relay.Rooms) != len(original.Relay.Rooms) {
-		t.Fatalf("Rooms len: got %d, want %d", len(loaded.Relay.Rooms), len(original.Relay.Rooms))
+	if len(loaded.Relay.Clipboards) != len(original.Relay.Clipboards) {
+		t.Fatalf("Clipboards len: got %d, want %d", len(loaded.Relay.Clipboards), len(original.Relay.Clipboards))
 	}
-	for i, r := range original.Relay.Rooms {
-		if loaded.Relay.Rooms[i].Name != r.Name {
-			t.Errorf("Room[%d].Name: got %q, want %q", i, loaded.Relay.Rooms[i].Name, r.Name)
+	for i, r := range original.Relay.Clipboards {
+		if loaded.Relay.Clipboards[i].Name != r.Name {
+			t.Errorf("Clipboard[%d].Name: got %q, want %q", i, loaded.Relay.Clipboards[i].Name, r.Name)
 		}
-		if loaded.Relay.Rooms[i].Enabled != r.Enabled {
-			t.Errorf("Room[%d].Enabled: got %v, want %v", i, loaded.Relay.Rooms[i].Enabled, r.Enabled)
+		if loaded.Relay.Clipboards[i].Enabled != r.Enabled {
+			t.Errorf("Clipboard[%d].Enabled: got %v, want %v", i, loaded.Relay.Clipboards[i].Enabled, r.Enabled)
 		}
 	}
 }

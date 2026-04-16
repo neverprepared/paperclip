@@ -11,7 +11,21 @@
       "Bash(launchctl list:*)",
       "Bash(git init:*)",
       "Bash(git remote add:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:upload.wikimedia.org)",
+      "WebFetch(domain:firebase.google.com)",
+      "Bash(go get:*)",
+      "Skill(reflex:brainbox)",
+      "Bash(find:*)",
+      "Bash(make build:*)",
+      "Bash(wc:*)",
+      "Bash(go mod:*)",
+      "Bash(git rm:*)",
+      "Bash(git commit:*)",
+      "Bash(go test:*)",
+      "Bash(grep -n \"nonce\\\\|plaintext\\\\|sender\\\\|replay\" /Users/cdowning/workspaces/profiles/personal/code/paperclip/relay/*.go)"
     ]
   },
   "enableAllProjectMcpServers": true,

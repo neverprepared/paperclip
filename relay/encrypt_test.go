@@ -79,7 +79,7 @@ func TestEncryptAADMismatchFails(t *testing.T) {
 		t.Fatalf("encrypt: %v", err)
 	}
 
-	// Decrypting with a different AAD must fail — prevents cross-room replay.
+	// Decrypting with a different AAD must fail — prevents cross-clipboard replay.
 	_, err = decrypt(key, ciphertext, []byte("room-b"))
 	if err == nil {
 		t.Error("expected decryption to fail with wrong AAD, but it succeeded")
@@ -186,7 +186,7 @@ func TestDeriveKeyRoomIsolation(t *testing.T) {
 }
 
 func TestDeriveKeyPassphraseIsolation(t *testing.T) {
-	// Different passphrases, same room must produce different keys.
+	// Different passphrases, same clipboard must produce different keys.
 	k1 := deriveKey("passphrase-x", "room")
 	k2 := deriveKey("passphrase-y", "room")
 

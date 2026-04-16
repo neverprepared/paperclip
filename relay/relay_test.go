@@ -206,7 +206,7 @@ func TestHandleMessage_WrongAAD_Dropped(t *testing.T) {
 	r := buildRelay(t, roomB, cb, "self", false)
 
 	// Encrypt with room-a's key and AAD.
-	ciphertext, _ := encrypt(roomA.encKey, []byte("cross-room data"), []byte(roomA.name))
+	ciphertext, _ := encrypt(roomA.encKey, []byte("cross-clipboard data"), []byte(roomA.name))
 	// But sign with room-b's key (so MAC passes) and hand to room-b handler.
 	msg := ablyMsg{
 		Type:   uint8(clipboard.TypeText),
@@ -218,7 +218,7 @@ func TestHandleMessage_WrongAAD_Dropped(t *testing.T) {
 	r.handleMessage(roomB, &ably.Message{Data: string(raw)})
 
 	if cb.WriteCount() != 0 {
-		t.Errorf("expected no writes for cross-room AAD mismatch, got %d", cb.WriteCount())
+		t.Errorf("expected no writes for cross-clipboard AAD mismatch, got %d", cb.WriteCount())
 	}
 }
 

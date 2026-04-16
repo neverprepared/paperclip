@@ -15,30 +15,30 @@ const (
 
 // SetPassphrase stores a room's passphrase in the system keychain.
 // Returns an error if the passphrase is shorter than minPassphraseLen.
-func SetPassphrase(room, passphrase string) error {
+func SetPassphrase(name, passphrase string) error {
 	if len(passphrase) < minPassphraseLen {
 		return fmt.Errorf("passphrase must be at least %d characters", minPassphraseLen)
 	}
-	return keyring.Set(keychainService, "room:"+room, passphrase)
+	return keyring.Set(keychainService, "clipboard:"+name, passphrase)
 }
 
 // GetPassphrase retrieves a room's passphrase from the system keychain.
-func GetPassphrase(room string) (string, error) {
-	pass, err := keyring.Get(keychainService, "room:"+room)
+func GetPassphrase(name string) (string, error) {
+	pass, err := keyring.Get(keychainService, "clipboard:"+name)
 	if err != nil {
-		return "", fmt.Errorf("no passphrase found for room '%s': %w", room, err)
+		return "", fmt.Errorf("no passphrase found for clipboard '%s': %w", name, err)
 	}
 	return pass, nil
 }
 
 // DeletePassphrase removes a room's passphrase from the system keychain.
-func DeletePassphrase(room string) error {
-	return keyring.Delete(keychainService, "room:"+room)
+func DeletePassphrase(name string) error {
+	return keyring.Delete(keychainService, "clipboard:"+name)
 }
 
 // HasPassphrase checks if a passphrase exists for a room.
-func HasPassphrase(room string) bool {
-	_, err := keyring.Get(keychainService, "room:"+room)
+func HasPassphrase(name string) bool {
+	_, err := keyring.Get(keychainService, "clipboard:"+name)
 	return err == nil
 }
 
