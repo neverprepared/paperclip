@@ -4,6 +4,7 @@ package clipboard
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"os/exec"
 )
@@ -105,18 +106,17 @@ return (imgData's base64EncodedStringWithOptions:0) as text`
 
 	// Decode base64
 	output = bytes.TrimSpace(output)
-	decoded := make([]byte, len(output))
-	n, err := decodeBase64(decoded, output)
+	decoded, err := base64.StdEncoding.DecodeString(string(output))
 	if err != nil {
 		return nil, err
 	}
-	return decoded[:n], nil
+	return decoded, nil
 }
 
 func (c *Clipboard) writeImage(data []byte) error {
 	// Use osascript to write PNG to clipboard
 	// Note: Must use class "NSData" syntax for proper class resolution
-	encoded := encodeBase64(data)
+	encoded := base64.StdEncoding.EncodeToString(data)
 	script := fmt.Sprintf(`use framework "AppKit"
 use framework "Foundation"
 use scripting additions
@@ -126,7 +126,7 @@ set nsData to current application's class "NSData"'s alloc()'s initWithBase64Enc
 set theClipboard to current application's NSPasteboard's generalPasteboard()
 theClipboard's clearContents()
 theClipboard's setData:nsData forType:(current application's NSPasteboardTypePNG)
-`, string(encoded))
+`, encoded)
 
 	cmd := exec.Command("osascript", "-e", script)
 	return cmd.Run()
