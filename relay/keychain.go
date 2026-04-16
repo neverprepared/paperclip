@@ -2,17 +2,23 @@ package relay
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/zalando/go-keyring"
 )
 
 const (
-	keychainService = "com.github.mindmorass.paperclip"
-	keychainAPIKey  = "ably-api-key"
+	keychainService  = "com.github.mindmorass.paperclip"
+	keychainAPIKey   = "ably-api-key"
+	minPassphraseLen = 8
 )
 
 // SetPassphrase stores a room's passphrase in the system keychain.
+// Returns an error if the passphrase is shorter than minPassphraseLen.
 func SetPassphrase(room, passphrase string) error {
+	if len(passphrase) < minPassphraseLen {
+		return fmt.Errorf("passphrase must be at least %d characters", minPassphraseLen)
+	}
 	return keyring.Set(keychainService, "room:"+room, passphrase)
 }
 
@@ -37,7 +43,11 @@ func HasPassphrase(room string) bool {
 }
 
 // SetAPIKey stores the Ably API key in the system keychain.
+// Returns an error if the key doesn't look like a valid Ably key (key:secret format).
 func SetAPIKey(key string) error {
+	if !strings.Contains(key, ":") || len(key) < 20 {
+		return fmt.Errorf("invalid Ably API key format (expected key:secret, at least 20 chars)")
+	}
 	return keyring.Set(keychainService, keychainAPIKey, key)
 }
 

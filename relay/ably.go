@@ -3,11 +3,13 @@ package relay
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"sync"
 	"time"
@@ -34,11 +36,20 @@ type ablyMsg struct {
 	MAC    string `json:"m"` // HMAC-SHA256(encKey, t:d:s) hex-encoded
 }
 
+// clipboardSyncer abstracts clipboard operations so the relay is testable
+// without touching the real OS clipboard.
+type clipboardSyncer interface {
+	Read() (*clipboard.Content, error)
+	Write(*clipboard.Content) error
+	HasChanged(string) bool
+	SetLastHash(string)
+}
+
 // Relay syncs clipboard data through Ably pub/sub across multiple rooms.
 type Relay struct {
 	client    *ably.Realtime
 	rooms     []*roomSub
-	clipboard *clipboard.Clipboard
+	clipboard clipboardSyncer
 	logger    *log.Logger
 	verbose   bool
 	sender    string
@@ -60,11 +71,7 @@ type roomSub struct {
 // are skipped. Returns an error if no rooms have passphrases.
 func New(apiKey string, roomNames []string, cb *clipboard.Clipboard, logger *log.Logger, verbose bool) (*Relay, error) {
 	if verbose {
-		keyPreview := apiKey
-		if len(keyPreview) > 20 {
-			keyPreview = keyPreview[:20] + "..."
-		}
-		logger.Printf("Ably key: %s", keyPreview)
+		logger.Printf("Ably key: [configured]")
 		logger.Printf("Ably rooms: %v", roomNames)
 	}
 
@@ -98,18 +105,25 @@ func New(apiKey string, roomNames []string, cb *clipboard.Clipboard, logger *log
 		return nil, fmt.Errorf("no rooms with passphrases configured — encryption is required")
 	}
 
+	senderBytes := make([]byte, 16)
+	if _, err := io.ReadFull(rand.Reader, senderBytes); err != nil {
+		client.Close()
+		return nil, fmt.Errorf("failed to generate sender ID: %w", err)
+	}
+	sender := hex.EncodeToString(senderBytes)
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Relay{
-		client:   client,
-		rooms:    rooms,
+		client:    client,
+		rooms:     rooms,
 		clipboard: cb,
-		logger:   logger,
-		verbose:  verbose,
-		sender:   fmt.Sprintf("%d", time.Now().UnixNano()%100000),
-		ctx:      ctx,
-		cancel:   cancel,
-		stopChan: make(chan struct{}),
+		logger:    logger,
+		verbose:   verbose,
+		sender:    sender,
+		ctx:       ctx,
+		cancel:    cancel,
+		stopChan:  make(chan struct{}),
 	}, nil
 }
 
