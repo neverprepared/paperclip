@@ -65,21 +65,24 @@ func Path() (string, error) {
 	return filepath.Join(dir, "config.json"), nil
 }
 
-// Load reads config from disk, returning defaults if file doesn't exist
+// Load reads config from disk, returning defaults if file doesn't exist.
 func Load() (*Config, error) {
 	p, err := Path()
 	if err != nil {
 		return DefaultConfig(), err
 	}
+	return LoadFrom(p)
+}
 
-	data, err := os.ReadFile(p)
+// LoadFrom reads config from the given path, returning defaults if not found.
+func LoadFrom(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return DefaultConfig(), nil
 		}
 		return DefaultConfig(), err
 	}
-
 	cfg := DefaultConfig()
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return DefaultConfig(), err
@@ -87,16 +90,20 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// Save writes config to disk
+// Save writes config to disk.
 func Save(cfg *Config) error {
 	p, err := Path()
 	if err != nil {
 		return err
 	}
+	return SaveTo(p, cfg)
+}
 
+// SaveTo writes config to the given path.
+func SaveTo(path string, cfg *Config) error {
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(p, data, 0600)
+	return os.WriteFile(path, data, 0600)
 }
