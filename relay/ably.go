@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,8 @@ import (
 	"github.com/ably/ably-go/ably"
 	"github.com/mindmorass/paperclip/clipboard"
 )
+
+const replayWindowSeconds = 5 * 60 // ±5 minutes
 
 // RoomStatus represents the state of a single relay room.
 type RoomStatus struct {
@@ -215,9 +218,26 @@ func (r *Relay) handleMessage(room *roomSub, msg *ably.Message) {
 	}
 
 	// Decrypt — room name is AAD to prevent cross-room replay.
-	plaintext, err := decrypt(room.encKey, raw, []byte(room.name))
+	decrypted, err := decrypt(room.encKey, raw, []byte(room.name))
 	if err != nil {
 		r.logger.Printf("Failed to decrypt message from room '%s': %v", room.name, err)
+		return
+	}
+
+	// Extract and validate the 8-byte timestamp prepended by the sender.
+	if len(decrypted) < 8 {
+		r.logger.Printf("Decrypted payload too short from room '%s' — dropping", room.name)
+		return
+	}
+	msgTs := int64(binary.BigEndian.Uint64(decrypted[:8]))
+	plaintext := decrypted[8:]
+
+	delta := time.Now().Unix() - msgTs
+	if delta < 0 {
+		delta = -delta
+	}
+	if delta > replayWindowSeconds {
+		r.logger.Printf("Replay rejected for room '%s': message timestamp drift %ds exceeds %ds window", room.name, delta, replayWindowSeconds)
 		return
 	}
 
@@ -274,8 +294,14 @@ func (r *Relay) pollAndPublish(interval time.Duration) {
 					continue
 				}
 
+				// Prepend 8-byte big-endian Unix timestamp inside the
+				// AEAD envelope so receivers can reject replayed messages.
+				ts := make([]byte, 8)
+				binary.BigEndian.PutUint64(ts, uint64(time.Now().Unix()))
+				payload := append(ts, content.Data...)
+
 				// Room name as AAD binds ciphertext to this room.
-				ciphertext, err := encrypt(room.encKey, content.Data, []byte(room.name))
+				ciphertext, err := encrypt(room.encKey, payload, []byte(room.name))
 				if err != nil {
 					r.logger.Printf("Failed to encrypt for room '%s': %v", room.name, err)
 					continue
@@ -288,13 +314,13 @@ func (r *Relay) pollAndPublish(interval time.Duration) {
 				}
 				amsg.MAC = computeMAC(room.encKey, amsg)
 
-				payload, err := json.Marshal(amsg)
+				msgJSON, err := json.Marshal(amsg)
 				if err != nil {
 					r.logger.Printf("Failed to marshal message for room '%s': %v", room.name, err)
 					continue
 				}
 
-				err = room.channel.Publish(r.ctx, "clipboard", string(payload))
+				err = room.channel.Publish(r.ctx, "clipboard", string(msgJSON))
 				if err != nil {
 					r.logger.Printf("Failed to publish to room %s: %v", room.name, err)
 				} else if r.verbose {

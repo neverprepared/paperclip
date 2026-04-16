@@ -2,11 +2,13 @@ package relay
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"log"
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ably/ably-go/ably"
 	"github.com/mindmorass/paperclip/clipboard"
@@ -79,9 +81,13 @@ func buildRelay(t *testing.T, room *roomSub, cb *fakeClipboard, sender string, v
 }
 
 // makeAblyMsg creates a valid, encrypted ablyMsg payload as a JSON string.
-func makeAblyMsg(t *testing.T, room *roomSub, sender string, plaintext []byte, contentType uint8) string {
+// tsOverride, when non-zero, replaces the current Unix timestamp (for replay tests).
+func makeAblyMsgAt(t *testing.T, room *roomSub, sender string, plaintext []byte, contentType uint8, ts int64) string {
 	t.Helper()
-	ciphertext, err := encrypt(room.encKey, plaintext, []byte(room.name))
+	tsBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(tsBytes, uint64(ts))
+	payload := append(tsBytes, plaintext...)
+	ciphertext, err := encrypt(room.encKey, payload, []byte(room.name))
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
@@ -96,6 +102,11 @@ func makeAblyMsg(t *testing.T, room *roomSub, sender string, plaintext []byte, c
 		t.Fatalf("json.Marshal: %v", err)
 	}
 	return string(raw)
+}
+
+func makeAblyMsg(t *testing.T, room *roomSub, sender string, plaintext []byte, contentType uint8) string {
+	t.Helper()
+	return makeAblyMsgAt(t, room, sender, plaintext, contentType, time.Now().Unix())
 }
 
 func testRoom(passphrase, name string) *roomSub {
@@ -149,8 +160,11 @@ func TestHandleMessage_InvalidHMAC_Dropped(t *testing.T) {
 	cb := &fakeClipboard{}
 	r := buildRelay(t, room, cb, "self", false)
 
-	// Build a valid msg then corrupt the MAC.
-	ciphertext, _ := encrypt(room.encKey, []byte("attack"), []byte(room.name))
+	// Build a valid msg then corrupt the MAC (HMAC check runs before decryption).
+	tsBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(tsBytes, uint64(time.Now().Unix()))
+	payload := append(tsBytes, []byte("attack")...)
+	ciphertext, _ := encrypt(room.encKey, payload, []byte(room.name))
 	msg := ablyMsg{
 		Type:   uint8(clipboard.TypeText),
 		Data:   base64.StdEncoding.EncodeToString(ciphertext),
@@ -213,7 +227,11 @@ func TestHandleMessage_TamperedCiphertext_Dropped(t *testing.T) {
 	cb := &fakeClipboard{}
 	r := buildRelay(t, room, cb, "self", false)
 
-	ciphertext, _ := encrypt(room.encKey, []byte("original"), []byte(room.name))
+	// Build a properly timestamped payload then tamper with it after encryption.
+	tsBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(tsBytes, uint64(time.Now().Unix()))
+	payload := append(tsBytes, []byte("original")...)
+	ciphertext, _ := encrypt(room.encKey, payload, []byte(room.name))
 	// Flip a byte in the ciphertext body (past the 12-byte nonce).
 	ciphertext[12] ^= 0xFF
 	msg := ablyMsg{
@@ -295,5 +313,50 @@ func TestHandleMessage_ImageType_PreservedOnWrite(t *testing.T) {
 	}
 	if got.Type != clipboard.TypeImage {
 		t.Errorf("expected TypeImage, got %v", got.Type)
+	}
+}
+
+func TestHandleMessage_OldTimestamp_Dropped(t *testing.T) {
+	room := testRoom("hunter2hunter2", "testroom")
+	cb := &fakeClipboard{}
+	r := buildRelay(t, room, cb, "self", false)
+
+	// Timestamp is 10 minutes in the past — outside the ±5-minute window.
+	oldTs := time.Now().Unix() - 600
+	payload := makeAblyMsgAt(t, room, "remote", []byte("stale clip"), uint8(clipboard.TypeText), oldTs)
+	r.handleMessage(room, &ably.Message{Data: payload})
+
+	if cb.WriteCount() != 0 {
+		t.Errorf("expected no writes for old timestamp, got %d", cb.WriteCount())
+	}
+}
+
+func TestHandleMessage_FutureTimestamp_Dropped(t *testing.T) {
+	room := testRoom("hunter2hunter2", "testroom")
+	cb := &fakeClipboard{}
+	r := buildRelay(t, room, cb, "self", false)
+
+	// Timestamp is 10 minutes in the future — outside the ±5-minute window.
+	futureTs := time.Now().Unix() + 600
+	payload := makeAblyMsgAt(t, room, "remote", []byte("future clip"), uint8(clipboard.TypeText), futureTs)
+	r.handleMessage(room, &ably.Message{Data: payload})
+
+	if cb.WriteCount() != 0 {
+		t.Errorf("expected no writes for future timestamp, got %d", cb.WriteCount())
+	}
+}
+
+func TestHandleMessage_TimestampAtWindowEdge_Accepted(t *testing.T) {
+	room := testRoom("hunter2hunter2", "testroom")
+	cb := &fakeClipboard{}
+	r := buildRelay(t, room, cb, "self", false)
+
+	// Timestamp is exactly at the edge of the window (4m 59s old).
+	edgeTs := time.Now().Unix() - (replayWindowSeconds - 1)
+	payload := makeAblyMsgAt(t, room, "remote", []byte("edge clip"), uint8(clipboard.TypeText), edgeTs)
+	r.handleMessage(room, &ably.Message{Data: payload})
+
+	if cb.WriteCount() != 1 {
+		t.Errorf("expected 1 write for timestamp at window edge, got %d", cb.WriteCount())
 	}
 }
