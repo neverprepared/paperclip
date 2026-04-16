@@ -61,6 +61,23 @@ type Relay struct {
 	cancel   context.CancelFunc
 	stopChan chan struct{}
 	wg       sync.WaitGroup
+
+	syncMu     sync.Mutex
+	lastSyncAt time.Time
+}
+
+// LastSyncAt returns the time of the most recent successful sync (send or receive).
+// Returns zero time if no sync has occurred yet.
+func (r *Relay) LastSyncAt() time.Time {
+	r.syncMu.Lock()
+	defer r.syncMu.Unlock()
+	return r.lastSyncAt
+}
+
+func (r *Relay) recordSync() {
+	r.syncMu.Lock()
+	r.lastSyncAt = time.Now()
+	r.syncMu.Unlock()
 }
 
 type roomSub struct {
@@ -255,6 +272,8 @@ func (r *Relay) handleMessage(room *roomSub, msg *ably.Message) {
 		return
 	}
 
+	r.recordSync()
+
 	if r.verbose {
 		typeStr := "text"
 		if content.Type == clipboard.TypeImage {
@@ -323,7 +342,10 @@ func (r *Relay) pollAndPublish(interval time.Duration) {
 				err = room.channel.Publish(r.ctx, "clipboard", string(msgJSON))
 				if err != nil {
 					r.logger.Printf("Failed to publish to room %s: %v", room.name, err)
-				} else if r.verbose {
+				} else {
+					r.recordSync()
+				}
+				if err == nil && r.verbose {
 					typeStr := "text"
 					if content.Type == clipboard.TypeImage {
 						typeStr = "image"

@@ -64,7 +64,7 @@ func main() {
 	}
 
 	if *tray {
-		runTray(cfg, apiKey)
+		runTray(cfg)
 	} else {
 		runDaemon(cfg, apiKey)
 	}
@@ -95,19 +95,23 @@ func startRelay(cfg *config.Config, apiKey string, cb *clipboard.Clipboard, logg
 	return r
 }
 
-func runTray(cfg *config.Config, apiKey string) {
+func runTray(cfg *config.Config) {
 	logger := log.New(os.Stdout, "[paperclip] ", log.LstdFlags)
-
 	cb := clipboard.New(logger)
-	r := startRelay(cfg, apiKey, cb, logger, cfg.Verbose)
+
+	// newRelay reads the API key from keychain each time so that key updates
+	// via the tray take effect without restarting the process.
+	newRelay := func() *relay.Relay {
+		key, _ := relay.GetAPIKey()
+		if key == "" {
+			key = os.Getenv("PAPERCLIP_ABLY_KEY")
+		}
+		return startRelay(cfg, key, cb, logger, cfg.Verbose)
+	}
 
 	logger.Println("Starting paperclip (tray mode)")
-
-	ui.Run(r, cfg, func() {
+	ui.Run(cfg, newRelay, func() {
 		logger.Println("Shutting down...")
-		if r != nil {
-			r.Stop()
-		}
 	})
 }
 
