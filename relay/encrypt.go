@@ -16,7 +16,8 @@ import (
 // even with the same passphrase.
 func deriveKey(passphrase, room string) []byte {
 	salt := sha256.Sum256([]byte("paperclip:" + room))
-	return argon2.IDKey([]byte(passphrase), salt[:], 1, 64*1024, 4, 32)
+	// Argon2id parameters: t=2, m=64MB, p=4 — meets RFC 9106 interactive minimum.
+	return argon2.IDKey([]byte(passphrase), salt[:], 2, 64*1024, 4, 32)
 }
 
 // encrypt encrypts plaintext using AES-256-GCM with the given key.

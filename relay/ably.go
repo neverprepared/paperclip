@@ -24,12 +24,14 @@ type RoomStatus struct {
 }
 
 // ablyMsg is the typed wire format for messages published to Ably channels.
+// Hash is intentionally omitted: it would expose content identity (same
+// clipboard → same hash) to anyone monitoring the Ably channel. Echo
+// prevention uses sender ID instead.
 type ablyMsg struct {
 	Type   uint8  `json:"t"`
 	Data   string `json:"d"` // base64(AES-256-GCM ciphertext)
-	Hash   string `json:"h"` // hash of plaintext for echo prevention
 	Sender string `json:"s"` // random per-session ID
-	MAC    string `json:"m"` // HMAC-SHA256(encKey, t:d:h:s) hex-encoded
+	MAC    string `json:"m"` // HMAC-SHA256(encKey, t:d:s) hex-encoded
 }
 
 // Relay syncs clipboard data through Ably pub/sub across multiple rooms.
@@ -41,10 +43,6 @@ type Relay struct {
 	verbose   bool
 	sender    string
 
-	// Echo prevention
-	lastPublishedHash string
-	mu                sync.Mutex
-
 	ctx      context.Context
 	cancel   context.CancelFunc
 	stopChan chan struct{}
@@ -52,9 +50,9 @@ type Relay struct {
 }
 
 type roomSub struct {
-	name   string
+	name    string
 	channel *ably.RealtimeChannel
-	encKey []byte // AES-256-GCM key derived from passphrase
+	encKey  []byte // AES-256-GCM key derived from passphrase
 }
 
 // New creates a new Ably relay connected to multiple rooms.
@@ -103,15 +101,15 @@ func New(apiKey string, roomNames []string, cb *clipboard.Clipboard, logger *log
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Relay{
-		client:    client,
-		rooms:     rooms,
+		client:   client,
+		rooms:    rooms,
 		clipboard: cb,
-		logger:    logger,
-		verbose:   verbose,
-		sender:    fmt.Sprintf("%d", time.Now().UnixNano()%100000),
-		ctx:       ctx,
-		cancel:    cancel,
-		stopChan:  make(chan struct{}),
+		logger:   logger,
+		verbose:  verbose,
+		sender:   fmt.Sprintf("%d", time.Now().UnixNano()%100000),
+		ctx:      ctx,
+		cancel:   cancel,
+		stopChan: make(chan struct{}),
 	}, nil
 }
 
@@ -186,14 +184,6 @@ func (r *Relay) handleMessage(room *roomSub, msg *ably.Message) {
 		return
 	}
 
-	// Echo prevention.
-	r.mu.Lock()
-	if amsg.Hash == r.lastPublishedHash {
-		r.mu.Unlock()
-		return
-	}
-	r.mu.Unlock()
-
 	// Verify HMAC — rejects injected messages from parties without the key.
 	if room.encKey == nil {
 		r.logger.Printf("ERROR: received message for room '%s' with no encryption key — dropping", room.name)
@@ -217,18 +207,19 @@ func (r *Relay) handleMessage(room *roomSub, msg *ably.Message) {
 		return
 	}
 
+	// Compute local hash so clipboard.Write sets the correct lastHash.
+	// This prevents re-publishing received content on the next poll cycle.
+	localHash := plaintextHash(plaintext)
 	content := &clipboard.Content{
 		Type: clipboard.ContentType(amsg.Type),
 		Data: plaintext,
-		Hash: amsg.Hash,
+		Hash: localHash,
 	}
 
 	if err := r.clipboard.Write(content); err != nil {
 		r.logger.Printf("Failed to write clipboard from relay: %v", err)
 		return
 	}
-
-	r.clipboard.SetLastHash(amsg.Hash)
 
 	if r.verbose {
 		typeStr := "text"
@@ -261,10 +252,6 @@ func (r *Relay) pollAndPublish(interval time.Duration) {
 
 			r.clipboard.SetLastHash(content.Hash)
 
-			r.mu.Lock()
-			r.lastPublishedHash = content.Hash
-			r.mu.Unlock()
-
 			// Publish to all rooms.
 			for _, room := range r.rooms {
 				// Encrypt — mandatory, refuse to publish if no key.
@@ -283,7 +270,6 @@ func (r *Relay) pollAndPublish(interval time.Duration) {
 				amsg := ablyMsg{
 					Type:   uint8(content.Type),
 					Data:   base64.StdEncoding.EncodeToString(ciphertext),
-					Hash:   content.Hash,
 					Sender: r.sender,
 				}
 				amsg.MAC = computeMAC(room.encKey, amsg)
@@ -309,11 +295,18 @@ func (r *Relay) pollAndPublish(interval time.Duration) {
 	}
 }
 
-// computeMAC returns HMAC-SHA256(key, "t:d:h:s") as a hex string.
+// plaintextHash returns the SHA-256 hex digest of data, matching the hash
+// scheme used by the clipboard package so SetLastHash stays consistent.
+func plaintextHash(data []byte) string {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
+}
+
+// computeMAC returns HMAC-SHA256(key, "t:d:s") as a hex string.
 // The MAC authenticates all message fields so injected messages are rejected.
 func computeMAC(key []byte, msg ablyMsg) string {
 	h := hmac.New(sha256.New, key)
-	fmt.Fprintf(h, "%d:%s:%s:%s", msg.Type, msg.Data, msg.Hash, msg.Sender)
+	fmt.Fprintf(h, "%d:%s:%s", msg.Type, msg.Data, msg.Sender)
 	return hex.EncodeToString(h.Sum(nil))
 }
 
