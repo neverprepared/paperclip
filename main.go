@@ -9,30 +9,21 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/flynn/noise"
 	"github.com/mindmorass/paperclip/clipboard"
-	"github.com/mindmorass/paperclip/crypto"
-	"github.com/mindmorass/paperclip/peer"
+	"github.com/mindmorass/paperclip/config"
+	"github.com/mindmorass/paperclip/relay"
+	"github.com/mindmorass/paperclip/ui"
 )
 
-var version = "0.1.0"
-
-// Config holds the parsed command-line configuration
-type Config struct {
-	Port    int
-	Peers   string
-	PollMs  int
-	Verbose bool
-}
+var version = "0.2.0"
 
 func main() {
 	var (
-		port       = flag.Int("port", 9999, "TCP port for peer connections")
-		peers      = flag.String("peers", "", "Comma-separated list of peer addresses (host:port)")
-		pollMs     = flag.Int("poll", 500, "Clipboard poll interval in milliseconds")
-		showVer    = flag.Bool("version", false, "Show version")
-		verbose    = flag.Bool("v", false, "Verbose logging")
-		genService = flag.Bool("service", false, "Generate platform service config and exit")
+		pollMs  = flag.Int("poll", 0, "Clipboard poll interval in milliseconds")
+		showVer = flag.Bool("version", false, "Show version")
+		verbose = flag.Bool("v", false, "Verbose logging")
+		tray    = flag.Bool("tray", false, "Run with menu bar UI")
+		ablyRoom = flag.String("ably-room", "", "Comma-separated Ably room names")
 	)
 	flag.Parse()
 
@@ -41,73 +32,103 @@ func main() {
 		os.Exit(0)
 	}
 
-	config := Config{
-		Port:    *port,
-		Peers:   *peers,
-		PollMs:  *pollMs,
-		Verbose: *verbose,
+	cfg, err := config.Load()
+	if err != nil {
+		log.Printf("Warning: could not load config (%v), using defaults", err)
 	}
 
-	if *genService {
-		generateServiceConfig(config)
-		os.Exit(0)
+	if *pollMs != 0 {
+		cfg.PollMs = *pollMs
+	}
+	if *verbose {
+		cfg.Verbose = true
 	}
 
-	runDaemon(config)
+	// Resolve Ably API key: keychain → env var (for CI/scripting).
+	apiKey, keychainErr := relay.GetAPIKey()
+	if keychainErr != nil {
+		if envKey := os.Getenv("PAPERCLIP_ABLY_KEY"); envKey != "" {
+			apiKey = envKey
+		}
+	}
+
+	if *ablyRoom != "" {
+		rooms := strings.Split(*ablyRoom, ",")
+		cfg.Relay.Rooms = nil
+		for _, r := range rooms {
+			r = strings.TrimSpace(r)
+			if r != "" {
+				cfg.Relay.Rooms = append(cfg.Relay.Rooms, config.Room{Name: r, Enabled: true})
+			}
+		}
+	}
+
+	if *tray {
+		runTray(cfg, apiKey)
+	} else {
+		runDaemon(cfg, apiKey)
+	}
 }
 
-func runDaemon(config Config) {
+func startRelay(cfg *config.Config, apiKey string, cb *clipboard.Clipboard, logger *log.Logger, verbose bool) *relay.Relay {
+	enabledRooms := cfg.Relay.EnabledRooms()
+	if apiKey == "" || len(enabledRooms) == 0 {
+		return nil
+	}
+
+	var roomNames []string
+	for _, r := range enabledRooms {
+		roomNames = append(roomNames, r.Name)
+	}
+
+	r, err := relay.New(apiKey, roomNames, cb, logger, verbose)
+	if err != nil {
+		logger.Printf("Failed to create relay: %v", err)
+		return nil
+	}
+
+	if err := r.Start(cfg.PollMs); err != nil {
+		logger.Printf("Failed to start relay: %v", err)
+		return nil
+	}
+
+	return r
+}
+
+func runTray(cfg *config.Config, apiKey string) {
 	logger := log.New(os.Stdout, "[paperclip] ", log.LstdFlags)
-	if !config.Verbose {
+
+	cb := clipboard.New(logger)
+	r := startRelay(cfg, apiKey, cb, logger, cfg.Verbose)
+
+	logger.Println("Starting paperclip (tray mode)")
+
+	ui.Run(r, cfg, func() {
+		logger.Println("Shutting down...")
+		if r != nil {
+			r.Stop()
+		}
+	})
+}
+
+func runDaemon(cfg *config.Config, apiKey string) {
+	logger := log.New(os.Stdout, "[paperclip] ", log.LstdFlags)
+	if !cfg.Verbose {
 		logger.SetOutput(os.Stderr)
 	}
 
-	// Check if any peer uses noise: prefix
-	usesCrypto := strings.Contains(config.Peers, "noise:")
+	cb := clipboard.New(logger)
+	r := startRelay(cfg, apiKey, cb, logger, cfg.Verbose)
 
-	var identity noise.DHKey
-	var knownHosts *crypto.KnownHosts
-
-	if usesCrypto {
-		// Initialize crypto
-		configDir, err := crypto.GetConfigDir()
-		if err != nil {
-			logger.Fatalf("Failed to get config directory: %v", err)
-		}
-
-		identity, err = crypto.LoadOrCreateIdentity(configDir)
-		if err != nil {
-			logger.Fatalf("Failed to load/create identity: %v", err)
-		}
-
-		knownHosts, err = crypto.LoadKnownHosts(configDir)
-		if err != nil {
-			logger.Fatalf("Failed to load known_hosts: %v", err)
-		}
-
-		logger.Printf("Local public key: %s", crypto.PublicKeyFull(identity.Public))
-		logger.Printf("Fingerprint: %s", crypto.PublicKeyFingerprint(identity.Public))
+	if r == nil {
+		logger.Fatal("No relay configured. Set up an Ably API key and rooms via --tray, or set PAPERCLIP_ABLY_KEY.")
 	}
 
-	cb := clipboard.New(logger)
-	node := peer.NewNode(config.Port, config.Peers, cb, logger, config.Verbose, identity, knownHosts)
-
-	// Handle graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	go func() {
-		<-sigChan
-		logger.Println("Shutting down...")
-		node.Stop()
-		os.Exit(0)
-	}()
-
-	logger.Printf("Starting paperclip on port %d\n", config.Port)
-	if usesCrypto {
-		logger.Printf("Encryption enabled for noise: prefixed peers")
-	}
-	if err := node.Start(config.PollMs); err != nil {
-		logger.Fatalf("Failed to start: %v", err)
-	}
+	logger.Println("Starting paperclip")
+	<-sigChan
+	logger.Println("Shutting down...")
+	r.Stop()
 }
