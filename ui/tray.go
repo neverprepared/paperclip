@@ -131,7 +131,7 @@ func (s *trayState) build() {
 	r := s.relay()
 	cfg := s.cfg
 
-	systray.SetTemplateIcon(iconData, iconDataRetina)
+	setTrayIcon()
 	systray.SetTooltip(s.tooltipText(r))
 
 	// ── Status ───────────────────────────────────────────────────────────
