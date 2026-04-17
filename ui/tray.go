@@ -126,9 +126,9 @@ func (s *trayState) build() {
 			mRoom := systray.AddMenuItem(clipboardMenuLabel(cb.Name, st, hasPass, r != nil), "")
 
 			// Connection status sub-item
-			connLabel := "  ○  Not connected"
+			connLabel := "  ⚪  Not connected"
 			if r != nil && st.Connected {
-				connLabel = "  ●  Connected"
+				connLabel = "  🟢  Connected"
 			} else if r == nil {
 				connLabel = "  —  Daemon not running"
 			}
@@ -327,19 +327,19 @@ func (s *trayState) build() {
 
 func (s *trayState) statusText(r *relay.Relay) string {
 	if len(s.cfg.Relay.Clipboards) == 0 {
-		return "⚠  Not configured"
+		return "⚠️  Not configured"
 	}
 	if r == nil {
-		return "○  Not connected"
+		return "⚪  Not connected"
 	}
 	if r.Connected() {
 		n := len(r.ClipboardNames())
 		if n == 1 {
-			return "●  Connected · 1 room"
+			return "🟢  Connected · 1 clipboard"
 		}
-		return fmt.Sprintf("●  Connected · %d rooms", n)
+		return fmt.Sprintf("🟢  Connected · %d clipboards", n)
 	}
-	return "○  Connecting..."
+	return "⚪  Connecting..."
 }
 
 func (s *trayState) tooltipText(r *relay.Relay) string {
@@ -378,9 +378,9 @@ func updateLastSync(r *relay.Relay, item *systray.MenuItem) {
 }
 
 func clipboardMenuLabel(name string, st relay.ClipboardStatus, hasPass bool, relayRunning bool) string {
-	dot := "○"
+	dot := "⚪"
 	if relayRunning && st.Connected {
-		dot = "●"
+		dot = "🟢"
 	}
 	label := fmt.Sprintf("  %s  %s", dot, name)
 	if hasPass {
