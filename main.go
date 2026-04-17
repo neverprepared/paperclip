@@ -15,7 +15,7 @@ import (
 	"github.com/mindmorass/paperclip/ui"
 )
 
-var version = "0.2.0"
+var version = "0.4.0"
 
 func main() {
 	var (
