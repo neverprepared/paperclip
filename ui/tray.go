@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"fyne.io/systray"
+	"github.com/mindmorass/paperclip/clipboard"
 	"github.com/mindmorass/paperclip/config"
 	"github.com/mindmorass/paperclip/relay"
 )
@@ -17,25 +19,30 @@ var validRoomName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // Run starts the systray menu bar UI and blocks until quit.
 // newRelay is called to create (or recreate) the relay whenever config changes.
-func Run(cfg *config.Config, newRelay func() *relay.Relay, onQuit func()) {
+// cb is used by the auto-clear timer to wipe the clipboard after inactivity.
+func Run(cfg *config.Config, cb *clipboard.Clipboard, newRelay func() *relay.Relay, onQuit func()) {
 	s := &trayState{
 		cfg:      cfg,
+		cb:       cb,
 		newRelay: newRelay,
 		onQuit:   onQuit,
 	}
 	s.r = newRelay()
+	s.startClearTimer(cfg.ClearAfterMinutes)
 
 	systray.Run(func() { s.build() }, func() {})
 }
 
 type trayState struct {
 	cfg      *config.Config
+	cb       *clipboard.Clipboard
 	newRelay func() *relay.Relay
 	onQuit   func()
 
-	mu         sync.Mutex
-	r          *relay.Relay
-	menuCancel context.CancelFunc
+	mu          sync.Mutex
+	r           *relay.Relay
+	menuCancel  context.CancelFunc
+	clearCancel context.CancelFunc
 }
 
 func (s *trayState) relay() *relay.Relay {
@@ -59,6 +66,51 @@ func (s *trayState) restart() {
 	s.mu.Lock()
 	s.r = r
 	s.mu.Unlock()
+}
+
+// startClearTimer cancels any existing clear timer and starts a new one.
+// minutes=0 disables auto-clear.
+func (s *trayState) startClearTimer(minutes int) {
+	s.mu.Lock()
+	if s.clearCancel != nil {
+		s.clearCancel()
+		s.clearCancel = nil
+	}
+	s.mu.Unlock()
+
+	if minutes <= 0 || s.cb == nil {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s.mu.Lock()
+	s.clearCancel = cancel
+	s.mu.Unlock()
+
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		lastHash := s.cb.GetLastHash()
+		lastChanged := time.Now()
+		cleared := false
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				current := s.cb.GetLastHash()
+				if current != lastHash {
+					lastHash = current
+					lastChanged = time.Now()
+					cleared = false
+				} else if !cleared && current != "" && time.Since(lastChanged) >= time.Duration(minutes)*time.Minute {
+					_ = s.cb.Write(&clipboard.Content{Type: clipboard.TypeText, Data: []byte{}})
+					cleared = true
+				}
+			}
+		}
+	}()
 }
 
 // build (re)constructs the entire tray menu. Safe to call from any goroutine.
@@ -157,6 +209,57 @@ func (s *trayState) build() {
 	mSetKey := systray.AddMenuItem("  Set API Key...", "Update your Ably API key")
 
 	systray.AddSeparator()
+
+	// ── Auto-clear submenu ────────────────────────────────────────────────
+	clearOptions := []struct {
+		label   string
+		minutes int
+	}{
+		{"Off", 0},
+		{"1 minute", 1},
+		{"5 minutes", 5},
+		{"10 minutes", 10},
+		{"30 minutes", 30},
+		{"1 hour", 60},
+		{"Custom...", -1},
+	}
+	current := cfg.ClearAfterMinutes
+	clearLabel := "Auto-clear: Off"
+	for _, o := range clearOptions {
+		if o.minutes == current && o.minutes >= 0 {
+			clearLabel = fmt.Sprintf("Auto-clear: %s", o.label)
+		}
+	}
+	if current > 0 {
+		found := false
+		for _, o := range clearOptions {
+			if o.minutes == current {
+				found = true
+				break
+			}
+		}
+		if !found {
+			clearLabel = fmt.Sprintf("Auto-clear: %d min", current)
+		}
+	}
+	mClear := systray.AddMenuItem(clearLabel, "Automatically clear clipboard after inactivity")
+	var clearSubs []*systray.MenuItem
+	for _, o := range clearOptions {
+		checked := o.minutes == current || (o.minutes == -1 && current > 0 && func() bool {
+			for _, x := range clearOptions {
+				if x.minutes == current {
+					return false
+				}
+			}
+			return true
+		}())
+		sub := mClear.AddSubMenuItem(o.label, "")
+		if checked {
+			sub.Check()
+		}
+		clearSubs = append(clearSubs, sub)
+	}
+
 	mLogin := systray.AddMenuItemCheckbox("Start at Login", "Launch Paperclip automatically at login", isLaunchAgentInstalled())
 
 	systray.AddSeparator()
@@ -263,6 +366,42 @@ func (s *trayState) build() {
 			}
 		}
 	}()
+
+	// Auto-clear options
+	for i, sub := range clearSubs {
+		i, sub := i, sub
+		opt := clearOptions[i]
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case _, ok := <-sub.ClickedCh:
+					if !ok {
+						return
+					}
+					minutes := opt.minutes
+					if minutes == -1 {
+						// Custom
+						raw := promptInput("Auto-clear", "Clear clipboard after how many minutes? (0 to disable):", fmt.Sprintf("%d", cfg.ClearAfterMinutes))
+						n, err := strconv.Atoi(strings.TrimSpace(raw))
+						if err != nil || n < 0 {
+							continue
+						}
+						minutes = n
+					}
+					cfg.ClearAfterMinutes = minutes
+					if err := config.Save(cfg); err != nil {
+						promptConfirm("Error", fmt.Sprintf("Failed to save config: %v", err))
+						continue
+					}
+					s.startClearTimer(minutes)
+					s.build()
+					return
+				}
+			}
+		}()
+	}
 
 	// Login toggle
 	go func() {

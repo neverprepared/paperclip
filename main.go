@@ -110,7 +110,7 @@ func runTray(cfg *config.Config) {
 	}
 
 	logger.Println("Starting paperclip (tray mode)")
-	ui.Run(cfg, newRelay, func() {
+	ui.Run(cfg, cb, newRelay, func() {
 		logger.Println("Shutting down...")
 	})
 }
