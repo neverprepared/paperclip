@@ -17,7 +17,7 @@ jobs:
     runs-on: macos-latest
     strategy:
       matrix:
-        goarch: [arm64, amd64]
+        goarch: [arm64]
 
     steps:
       - name: Checkout
@@ -143,7 +143,6 @@ jobs:
       - name: Prepare release assets
         run: |
           mv artifacts/paperclip-darwin-arm64/paperclip  paperclip-darwin-arm64
-          mv artifacts/paperclip-darwin-amd64/paperclip  paperclip-darwin-amd64
           mv artifacts/paperclip-windows-amd64/paperclip.exe  paperclip-windows-amd64.exe
           mv artifacts/paperclip-windows-tray-amd64/paperclip-tray.exe  paperclip-windows-tray-amd64.exe
           mv artifacts/paperclip-windows-386/paperclip.exe  paperclip-windows-386.exe
@@ -153,7 +152,6 @@ jobs:
         with:
           files: |
             paperclip-darwin-arm64
-            paperclip-darwin-amd64
             paperclip-windows-amd64.exe
             paperclip-windows-tray-amd64.exe
             paperclip-windows-386.exe
