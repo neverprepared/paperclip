@@ -381,7 +381,31 @@ func (s *trayState) build() {
 		}
 	}
 
-	// Hub mode toggle
+	// syncBroadcastChecks updates checkbox visuals to match cfg.HubTargets
+	// without rebuilding the menu (keeps it open).
+	syncBroadcastChecks := func() {
+		if len(cfg.HubTargets) == 0 {
+			mBcastAll.Check()
+		} else {
+			mBcastAll.Uncheck()
+		}
+		for _, bs := range broadcastSubs {
+			inTargets := false
+			for _, t := range cfg.HubTargets {
+				if t == bs.name {
+					inTargets = true
+					break
+				}
+			}
+			if inTargets {
+				bs.item.Check()
+			} else {
+				bs.item.Uncheck()
+			}
+		}
+	}
+
+	// Hub mode toggle — needs full rebuild to show/hide the Broadcast submenu.
 	go func() {
 		for {
 			select {
@@ -403,7 +427,7 @@ func (s *trayState) build() {
 		}
 	}()
 
-	// "All Clipboards" broadcast option
+	// "All Clipboards" — clear targets, update checks in-place.
 	go func() {
 		for {
 			select {
@@ -419,13 +443,12 @@ func (s *trayState) build() {
 					continue
 				}
 				applyHubFilter()
-				s.build()
-				return
+				syncBroadcastChecks()
 			}
 		}
 	}()
 
-	// Per-clipboard broadcast toggles
+	// Per-clipboard broadcast toggles — update checks in-place, menu stays open.
 	for _, bs := range broadcastSubs {
 		bs := bs
 		go func() {
@@ -458,8 +481,7 @@ func (s *trayState) build() {
 						continue
 					}
 					applyHubFilter()
-					s.build()
-					return
+					syncBroadcastChecks()
 				}
 			}
 		}()
