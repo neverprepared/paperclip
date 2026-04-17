@@ -5,7 +5,6 @@ package ui
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/mindmorass/paperclip/config"
 	"golang.org/x/sys/windows/registry"
@@ -32,17 +31,12 @@ func installLaunchAgent(cfg *config.Config) error {
 		return fmt.Errorf("could not determine executable path: %w", err)
 	}
 
-	var names []string
-	for _, c := range cfg.Relay.EnabledClipboards() {
-		names = append(names, c.Name)
-	}
-
-	// Run in tray mode at login. Clipboard names are embedded so the registry
-	// entry reflects the current config (updated on next install call).
-	value := fmt.Sprintf(`"%s" --tray --poll %d`, execPath, cfg.PollMs)
-	if len(names) > 0 {
-		value += fmt.Sprintf(` --clipboard %s`, strings.Join(names, ","))
-	}
+	// Store only the executable path — no flags needed. The binary name
+	// contains "tray" so it defaults to tray mode automatically, and all
+	// config (clipboards, poll rate, etc.) is read from config.json at
+	// startup. Hardcoding flags here would cause stale config after the
+	// user makes changes via the tray UI.
+	value := fmt.Sprintf(`"%s"`, execPath)
 
 	k, err := registry.OpenKey(registry.CURRENT_USER, runKeyPath, registry.SET_VALUE)
 	if err != nil {
