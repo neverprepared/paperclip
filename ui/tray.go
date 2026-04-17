@@ -2,6 +2,8 @@ package ui
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -710,6 +712,7 @@ func (s *trayState) runSetupFlow() bool {
 }
 
 // runAddRoomFlow prompts for a clipboard name + passphrase, persists both.
+// In hub mode the passphrase is auto-generated and shown for copying to spokes.
 // Returns true if a clipboard was successfully added.
 func (s *trayState) runAddRoomFlow() bool {
 	// Ensure API key exists first.
@@ -733,9 +736,37 @@ func (s *trayState) runAddRoomFlow() bool {
 		return false
 	}
 
-	pass := promptPassphrase(fmt.Sprintf("Set passphrase for clipboard \"%s\".\nAll devices sharing this clipboard must use the same passphrase.", name))
-	if pass == "" {
-		return false
+	var pass string
+	if s.cfg.IsHub {
+		// Hub: generate a strong passphrase and show it so the user can copy
+		// it to spoke machines.
+		generated, err := generatePassphrase()
+		if err != nil {
+			promptConfirm("Error", fmt.Sprintf("Failed to generate passphrase: %v", err))
+			return false
+		}
+		// Pre-fill the dialog so the user can select-all and copy.
+		// Also write to clipboard for instant paste on spokes.
+		if s.cb != nil {
+			_ = s.cb.Write(&clipboard.Content{Type: clipboard.TypeText, Data: []byte(generated)})
+		}
+		pass = promptInput(
+			"Clipboard Passphrase (Hub)",
+			fmt.Sprintf("Passphrase for \"%s\" — copied to your clipboard.\n\nEnter this on every spoke machine.\nEdit if you prefer your own, or click OK to use the generated one:", name),
+			generated,
+		)
+		if pass == "" {
+			return false
+		}
+		if len(pass) < 8 {
+			promptConfirm("Too Short", "Passphrase must be at least 8 characters.")
+			return false
+		}
+	} else {
+		pass = promptPassphrase(fmt.Sprintf("Set passphrase for clipboard \"%s\".\nAll devices sharing this clipboard must use the same passphrase.", name))
+		if pass == "" {
+			return false
+		}
 	}
 
 	if err := relay.SetPassphrase(name, pass); err != nil {
@@ -749,6 +780,17 @@ func (s *trayState) runAddRoomFlow() bool {
 		return false
 	}
 	return true
+}
+
+// generatePassphrase returns a cryptographically random passphrase in the
+// format xxxx-xxxx-xxxx-xxxx-xxxx-xxxx (24 hex chars + dashes, 96 bits).
+func generatePassphrase() (string, error) {
+	b := make([]byte, 12)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	h := hex.EncodeToString(b) // 24 hex chars
+	return fmt.Sprintf("%s-%s-%s-%s-%s-%s", h[0:4], h[4:8], h[8:12], h[12:16], h[16:20], h[20:24]), nil
 }
 
 // promptPassphrase loops until the user enters a valid passphrase or cancels.
