@@ -12,8 +12,12 @@ permissions:
   contents: write
 
 jobs:
+  # ── macOS ─────────────────────────────────────────────────────────────────
   build-macos:
     runs-on: macos-latest
+    strategy:
+      matrix:
+        goarch: [arm64, amd64]
 
     steps:
       - name: Checkout
@@ -22,15 +26,14 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.24'
 
       - name: Build
         env:
           GOOS: darwin
-          GOARCH: arm64
+          GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 1
-        run: |
-          go build -ldflags="-s -w" -o paperclip .
+        run: go build -ldflags="-s -w" -o paperclip .
 
       - name: Import Code Signing Certificate
         if: github.event_name != 'pull_request'
@@ -56,7 +59,6 @@ jobs:
         run: |
           codesign --force --options runtime --sign "$MACOS_IDENTITY" \
             --timestamp paperclip
-
           codesign --verify --verbose paperclip
 
       - name: Notarize
@@ -79,19 +81,15 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: paperclip-darwin-arm64
+          name: paperclip-darwin-${{ matrix.goarch }}
           path: paperclip
 
+  # ── Windows ───────────────────────────────────────────────────────────────
   build-windows:
     runs-on: ubuntu-latest
-
     strategy:
       matrix:
-        include:
-          - goarch: amd64
-            artifact: paperclip-windows-amd64
-          - goarch: 386
-            artifact: paperclip-windows-386
+        goarch: [amd64, 386]
 
     steps:
       - name: Checkout
@@ -100,57 +98,63 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.24'
 
-      - name: Build
+      - name: Build daemon (with console)
         env:
           GOOS: windows
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
-        run: |
-          go build -ldflags="-s -w" -o paperclip.exe .
+        run: go build -ldflags="-s -w" -o paperclip.exe .
 
-      - name: Upload Artifact
+      - name: Build tray (no console window)
+        if: matrix.goarch == 'amd64'
+        env:
+          GOOS: windows
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: go build -ldflags="-s -w -H windowsgui" -o paperclip-tray.exe .
+
+      - name: Upload daemon artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
+          name: paperclip-windows-${{ matrix.goarch }}
           path: paperclip.exe
 
+      - name: Upload tray artifact
+        if: matrix.goarch == 'amd64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: paperclip-windows-tray-amd64
+          path: paperclip-tray.exe
+
+  # ── Release ───────────────────────────────────────────────────────────────
   release:
     if: startsWith(github.ref, 'refs/tags/')
     needs: [build-macos, build-windows]
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download macOS Artifact
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: paperclip-darwin-arm64
-          path: artifacts/darwin-arm64
+          path: artifacts
 
-      - name: Download Windows AMD64 Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: paperclip-windows-amd64
-          path: artifacts/windows-amd64
-
-      - name: Download Windows 386 Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: paperclip-windows-386
-          path: artifacts/windows-386
-
-      - name: Prepare Release Assets
+      - name: Prepare release assets
         run: |
-          mv artifacts/darwin-arm64/paperclip paperclip-darwin-arm64
-          mv artifacts/windows-amd64/paperclip.exe paperclip-windows-amd64.exe
-          mv artifacts/windows-386/paperclip.exe paperclip-windows-386.exe
+          mv artifacts/paperclip-darwin-arm64/paperclip  paperclip-darwin-arm64
+          mv artifacts/paperclip-darwin-amd64/paperclip  paperclip-darwin-amd64
+          mv artifacts/paperclip-windows-amd64/paperclip.exe  paperclip-windows-amd64.exe
+          mv artifacts/paperclip-windows-tray-amd64/paperclip-tray.exe  paperclip-windows-tray-amd64.exe
+          mv artifacts/paperclip-windows-386/paperclip.exe  paperclip-windows-386.exe
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             paperclip-darwin-arm64
+            paperclip-darwin-amd64
             paperclip-windows-amd64.exe
+            paperclip-windows-tray-amd64.exe
             paperclip-windows-386.exe
           generate_release_notes: true
