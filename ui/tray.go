@@ -28,7 +28,7 @@ func Run(cfg *config.Config, cb *clipboard.Clipboard, newRelay func() *relay.Rel
 		onQuit:   onQuit,
 	}
 	s.r = newRelay()
-	s.startClearTimer(cfg.ClearAfterMinutes)
+	s.startClearTimer(cfg.ClearAfterSeconds)
 
 	systray.Run(func() { s.build() }, func() {})
 }
@@ -69,8 +69,8 @@ func (s *trayState) restart() {
 }
 
 // startClearTimer cancels any existing clear timer and starts a new one.
-// minutes=0 disables auto-clear.
-func (s *trayState) startClearTimer(minutes int) {
+// seconds=0 disables auto-clear.
+func (s *trayState) startClearTimer(seconds int) {
 	s.mu.Lock()
 	if s.clearCancel != nil {
 		s.clearCancel()
@@ -78,7 +78,7 @@ func (s *trayState) startClearTimer(minutes int) {
 	}
 	s.mu.Unlock()
 
-	if minutes <= 0 || s.cb == nil {
+	if seconds <= 0 || s.cb == nil {
 		return
 	}
 
@@ -88,7 +88,7 @@ func (s *trayState) startClearTimer(minutes int) {
 	s.mu.Unlock()
 
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 		lastHash := s.cb.GetLastHash()
 		lastChanged := time.Now()
@@ -104,7 +104,7 @@ func (s *trayState) startClearTimer(minutes int) {
 					lastHash = current
 					lastChanged = time.Now()
 					cleared = false
-				} else if !cleared && current != "" && time.Since(lastChanged) >= time.Duration(minutes)*time.Minute {
+				} else if !cleared && current != "" && time.Since(lastChanged) >= time.Duration(seconds)*time.Second {
 					_ = s.cb.Write(&clipboard.Content{Type: clipboard.TypeText, Data: []byte{}})
 					cleared = true
 				}
@@ -213,41 +213,44 @@ func (s *trayState) build() {
 	// ── Auto-clear submenu ────────────────────────────────────────────────
 	clearOptions := []struct {
 		label   string
-		minutes int
+		seconds int
 	}{
 		{"Off", 0},
-		{"1 minute", 1},
-		{"5 minutes", 5},
-		{"10 minutes", 10},
-		{"30 minutes", 30},
-		{"1 hour", 60},
+		{"5 seconds", 5},
+		{"10 seconds", 10},
+		{"15 seconds", 15},
+		{"20 seconds", 20},
+		{"30 seconds", 30},
+		{"40 seconds", 40},
+		{"50 seconds", 50},
+		{"60 seconds", 60},
 		{"Custom...", -1},
 	}
-	current := cfg.ClearAfterMinutes
+	current := cfg.ClearAfterSeconds
 	clearLabel := "Auto-clear: Off"
 	for _, o := range clearOptions {
-		if o.minutes == current && o.minutes >= 0 {
+		if o.seconds == current && o.seconds >= 0 {
 			clearLabel = fmt.Sprintf("Auto-clear: %s", o.label)
 		}
 	}
 	if current > 0 {
 		found := false
 		for _, o := range clearOptions {
-			if o.minutes == current {
+			if o.seconds == current {
 				found = true
 				break
 			}
 		}
 		if !found {
-			clearLabel = fmt.Sprintf("Auto-clear: %d min", current)
+			clearLabel = fmt.Sprintf("Auto-clear: %ds", current)
 		}
 	}
 	mClear := systray.AddMenuItem(clearLabel, "Automatically clear clipboard after inactivity")
 	var clearSubs []*systray.MenuItem
 	for _, o := range clearOptions {
-		checked := o.minutes == current || (o.minutes == -1 && current > 0 && func() bool {
+		checked := o.seconds == current || (o.seconds == -1 && current > 0 && func() bool {
 			for _, x := range clearOptions {
-				if x.minutes == current {
+				if x.seconds == current {
 					return false
 				}
 			}
@@ -380,22 +383,22 @@ func (s *trayState) build() {
 					if !ok {
 						return
 					}
-					minutes := opt.minutes
-					if minutes == -1 {
+					seconds := opt.seconds
+					if seconds == -1 {
 						// Custom
-						raw := promptInput("Auto-clear", "Clear clipboard after how many minutes? (0 to disable):", fmt.Sprintf("%d", cfg.ClearAfterMinutes))
+						raw := promptInput("Auto-clear", "Clear clipboard after how many seconds? (0 to disable):", fmt.Sprintf("%d", cfg.ClearAfterSeconds))
 						n, err := strconv.Atoi(strings.TrimSpace(raw))
 						if err != nil || n < 0 {
 							continue
 						}
-						minutes = n
+						seconds = n
 					}
-					cfg.ClearAfterMinutes = minutes
+					cfg.ClearAfterSeconds = seconds
 					if err := config.Save(cfg); err != nil {
 						promptConfirm("Error", fmt.Sprintf("Failed to save config: %v", err))
 						continue
 					}
-					s.startClearTimer(minutes)
+					s.startClearTimer(seconds)
 					s.build()
 					return
 				}

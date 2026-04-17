@@ -33,7 +33,7 @@ func (r *RelayConfig) EnabledClipboards() []Clipboard {
 type Config struct {
 	PollMs            int         `json:"poll_ms"`
 	Verbose           bool        `json:"verbose"`
-	ClearAfterMinutes int         `json:"clear_after_minutes"` // 0 = disabled
+	ClearAfterSeconds int         `json:"clear_after_seconds"` // 0 = disabled
 	Relay             RelayConfig `json:"relay"`
 }
 
