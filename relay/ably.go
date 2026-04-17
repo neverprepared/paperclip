@@ -64,6 +64,34 @@ type Relay struct {
 
 	syncMu     sync.Mutex
 	lastSyncAt time.Time
+
+	filterMu      sync.RWMutex
+	publishFilter map[string]bool // nil = publish to all; non-nil = hub mode with selected targets
+}
+
+// SetPublishFilter sets which clipboards this relay publishes to.
+// An empty/nil slice means publish to all (spoke behaviour).
+// A non-empty slice enables hub mode, publishing only to named clipboards.
+func (r *Relay) SetPublishFilter(targets []string) {
+	r.filterMu.Lock()
+	defer r.filterMu.Unlock()
+	if len(targets) == 0 {
+		r.publishFilter = nil
+		return
+	}
+	r.publishFilter = make(map[string]bool, len(targets))
+	for _, t := range targets {
+		r.publishFilter[t] = true
+	}
+}
+
+func (r *Relay) shouldPublishTo(name string) bool {
+	r.filterMu.RLock()
+	defer r.filterMu.RUnlock()
+	if r.publishFilter == nil {
+		return true
+	}
+	return r.publishFilter[name]
 }
 
 // LastSyncAt returns the time of the most recent successful sync (send or receive).
@@ -305,8 +333,11 @@ func (r *Relay) pollAndPublish(interval time.Duration) {
 
 			r.clipboard.SetLastHash(content.Hash)
 
-			// Publish to all rooms.
+			// Publish to selected clipboards (all in spoke mode; filtered in hub mode).
 			for _, room := range r.rooms {
+				if !r.shouldPublishTo(room.name) {
+					continue
+				}
 				// Encrypt — mandatory, refuse to publish if no key.
 				if room.encKey == nil {
 					r.logger.Printf("ERROR: clipboard '%s' has no encryption key — refusing to publish", room.name)

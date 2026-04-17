@@ -205,6 +205,48 @@ func (s *trayState) build() {
 	}
 
 	systray.AddSeparator()
+
+	// ── Hub mode ─────────────────────────────────────────────────────────
+	mHub := systray.AddMenuItemCheckbox("  Hub Mode", "Route clipboard to specific destinations", cfg.IsHub)
+
+	// "Broadcast to" submenu — only meaningful in hub mode
+	var broadcastSubs []struct {
+		name string
+		item *systray.MenuItem
+	}
+	mBroadcast := systray.AddMenuItem("  Broadcast to...", "Choose which clipboards receive your copies")
+	if !cfg.IsHub {
+		mBroadcast.Hide()
+	}
+	// One checkbox per clipboard
+	allNames := make([]string, len(cfg.Relay.Clipboards))
+	for i, c := range cfg.Relay.Clipboards {
+		allNames[i] = c.Name
+	}
+	mBcastAll := mBroadcast.AddSubMenuItem("All Clipboards", "Send to every connected clipboard")
+	mBroadcast.AddSeparator()
+	if len(cfg.HubTargets) == 0 {
+		mBcastAll.Check()
+	}
+	for _, name := range allNames {
+		name := name
+		checked := false
+		if len(cfg.HubTargets) > 0 {
+			for _, t := range cfg.HubTargets {
+				if t == name {
+					checked = true
+					break
+				}
+			}
+		}
+		sub := mBroadcast.AddSubMenuItemCheckbox(name, "", checked)
+		broadcastSubs = append(broadcastSubs, struct {
+			name string
+			item *systray.MenuItem
+		}{name, sub})
+	}
+
+	systray.AddSeparator()
 	mAddRoom := systray.AddMenuItem("  Add Clipboard...", "Add a new sync clipboard")
 	mSetKey := systray.AddMenuItem("  Set API Key...", "Update your Ably API key")
 
@@ -319,6 +361,103 @@ func (s *trayState) build() {
 						return
 					}
 					s.restart()
+					s.build()
+					return
+				}
+			}
+		}()
+	}
+
+	// applyHubFilter pushes the current hub config to the relay without restart.
+	applyHubFilter := func() {
+		r := s.relay()
+		if r == nil {
+			return
+		}
+		if !cfg.IsHub || len(cfg.HubTargets) == 0 {
+			r.SetPublishFilter(nil)
+		} else {
+			r.SetPublishFilter(cfg.HubTargets)
+		}
+	}
+
+	// Hub mode toggle
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case _, ok := <-mHub.ClickedCh:
+				if !ok {
+					return
+				}
+				cfg.IsHub = !cfg.IsHub
+				if err := config.Save(cfg); err != nil {
+					promptConfirm("Error", fmt.Sprintf("Failed to save config: %v", err))
+					continue
+				}
+				applyHubFilter()
+				s.build()
+				return
+			}
+		}
+	}()
+
+	// "All Clipboards" broadcast option
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case _, ok := <-mBcastAll.ClickedCh:
+				if !ok {
+					return
+				}
+				cfg.HubTargets = nil
+				if err := config.Save(cfg); err != nil {
+					promptConfirm("Error", fmt.Sprintf("Failed to save config: %v", err))
+					continue
+				}
+				applyHubFilter()
+				s.build()
+				return
+			}
+		}
+	}()
+
+	// Per-clipboard broadcast toggles
+	for _, bs := range broadcastSubs {
+		bs := bs
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case _, ok := <-bs.item.ClickedCh:
+					if !ok {
+						return
+					}
+					// Toggle this clipboard in HubTargets.
+					found := false
+					for i, t := range cfg.HubTargets {
+						if t == bs.name {
+							cfg.HubTargets = append(cfg.HubTargets[:i], cfg.HubTargets[i+1:]...)
+							found = true
+							break
+						}
+					}
+					if !found {
+						cfg.HubTargets = append(cfg.HubTargets, bs.name)
+					}
+					// If nothing selected, fall back to "all".
+					if len(cfg.HubTargets) == 0 {
+						cfg.HubTargets = nil
+					}
+					if err := config.Save(cfg); err != nil {
+						promptConfirm("Error", fmt.Sprintf("Failed to save config: %v", err))
+						continue
+					}
+					applyHubFilter()
 					s.build()
 					return
 				}
@@ -476,10 +615,14 @@ func (s *trayState) statusText(r *relay.Relay) string {
 	}
 	if r.Connected() {
 		n := len(r.ClipboardNames())
-		if n == 1 {
-			return "🟢  Connected · 1 clipboard"
+		suffix := ""
+		if s.cfg.IsHub {
+			suffix = " · hub"
 		}
-		return fmt.Sprintf("🟢  Connected · %d clipboards", n)
+		if n == 1 {
+			return fmt.Sprintf("🟢  Connected · 1 clipboard%s", suffix)
+		}
+		return fmt.Sprintf("🟢  Connected · %d clipboards%s", n, suffix)
 	}
 	return "⚪  Connecting..."
 }

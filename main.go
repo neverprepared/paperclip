@@ -92,6 +92,11 @@ func startRelay(cfg *config.Config, apiKey string, cb *clipboard.Clipboard, logg
 		return nil
 	}
 
+	// Apply hub publish filter from config.
+	if cfg.IsHub {
+		r.SetPublishFilter(cfg.HubTargets)
+	}
+
 	return r
 }
 
