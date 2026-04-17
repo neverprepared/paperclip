@@ -63,7 +63,9 @@ func main() {
 		}
 	}
 
-	if *tray {
+	// Default to tray mode when the binary name contains "tray"
+	// (e.g. paperclip-tray.exe) so double-clicking it just works.
+	if *tray || strings.Contains(strings.ToLower(os.Args[0]), "tray") {
 		runTray(cfg)
 	} else {
 		runDaemon(cfg, apiKey)
