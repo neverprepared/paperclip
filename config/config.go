@@ -46,13 +46,17 @@ func DefaultConfig() *Config {
 	}
 }
 
-// Dir returns the config directory path, creating it if needed
+// Dir returns the config directory path, creating it if needed.
+// Uses os.UserConfigDir() so the path is correct on all platforms:
+//   - macOS:   ~/Library/Application Support/Paperclip
+//   - Windows: %AppData%\Paperclip
+//   - Linux:   ~/.config/Paperclip
 func Dir() (string, error) {
-	home, err := os.UserHomeDir()
+	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(home, "Library", "Application Support", "Paperclip")
+	dir := filepath.Join(base, "Paperclip")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", err
 	}

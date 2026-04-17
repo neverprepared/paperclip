@@ -1,4 +1,4 @@
-.PHONY: build install uninstall clean app
+.PHONY: build install uninstall clean app build-windows build-windows-tray
 
 BINARY=paperclip
 APP_NAME=Paperclip.app
@@ -64,4 +64,12 @@ uninstall: unload
 	@echo "Uninstalled."
 
 clean:
-	rm -f $(BINARY)
+	rm -f $(BINARY) paperclip.exe paperclip-tray.exe
+
+# Windows: daemon mode with console (useful for debugging / headless setups)
+build-windows:
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o paperclip.exe .
+
+# Windows: tray mode without a console window (primary desktop UX)
+build-windows-tray:
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -H windowsgui" -o paperclip-tray.exe .

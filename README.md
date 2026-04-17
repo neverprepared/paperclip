@@ -8,13 +8,13 @@ Paperclip uses [Ably](https://ably.com) as a pub/sub relay. Every message is enc
 
 ## Requirements
 
-- macOS (primary support)
+- macOS or Windows (no administrator access required)
 - A free [Ably account](https://ably.com) — the free tier is sufficient
 - Go 1.24+ (to build from source)
 
 ## Installation
 
-### From source
+### macOS — from source
 
 ```bash
 git clone https://github.com/mindmorass/paperclip
@@ -22,19 +22,35 @@ cd paperclip
 make install   # builds and copies to ~/bin
 ```
 
-### macOS .app bundle (menu bar, no dock icon)
+### macOS — .app bundle (menu bar, no dock icon)
 
 ```bash
 make app
 # Drag Paperclip.app to /Applications
 ```
 
+### Windows — from source
+
+```bash
+# Tray mode (no console window — recommended for desktop use)
+make build-windows-tray   # produces paperclip-tray.exe
+
+# Daemon/headless mode (console window for log output)
+make build-windows        # produces paperclip.exe
+```
+
+> Cross-compiling from macOS/Linux requires no additional tools — `CGO_ENABLED=0` is set automatically.
+
 ## First-time setup
 
 Run with the tray UI:
 
 ```bash
+# macOS
 paperclip --tray
+
+# Windows (use the no-console build to avoid a terminal window)
+paperclip-tray.exe --tray
 ```
 
 Click the menubar icon → **Configure Paperclip...** and follow the prompts:
@@ -49,11 +65,12 @@ Repeat on each machine. Paperclip will start syncing within one poll interval (d
 
 From the tray menu: **Settings → Install Login Item**
 
-This installs a LaunchAgent that starts Paperclip at login. Logs are written to `~/Library/Logs/paperclip.log`.
+- **macOS**: installs a LaunchAgent (`~/Library/LaunchAgents/`). Logs → `~/Library/Logs/paperclip.log`.
+- **Windows**: writes a value to `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run`. No administrator access required.
 
 ## CLI / daemon mode
 
-Useful for scripting or headless machines. The Ably API key is read from the macOS Keychain, or from the `PAPERCLIP_ABLY_KEY` environment variable as a fallback.
+Useful for scripting or headless machines. The Ably API key is read from the system credential store (macOS Keychain / Windows Credential Manager), or from the `PAPERCLIP_ABLY_KEY` environment variable as a fallback.
 
 ```bash
 paperclip --clipboard myroom
@@ -61,7 +78,14 @@ paperclip --clipboard room1,room2   # join multiple clipboards
 paperclip --poll 250 -v             # 250ms poll interval, verbose logging
 ```
 
-Passphrases must be set in the Keychain (via the tray UI) before running in daemon mode.
+Passphrases must be stored in the credential store (via the tray UI, or `cmdkey` on Windows) before running in daemon mode.
+
+**Windows — pre-store credentials without the tray UI:**
+```powershell
+cmdkey /add:com.github.mindmorass.paperclip /user:ably-api-key /pass:YOUR_KEY
+cmdkey /add:com.github.mindmorass.paperclip /user:clipboard:myroom /pass:YOUR_PASSPHRASE
+paperclip.exe --clipboard myroom
+```
 
 ## Hub-spoke mode
 
@@ -79,7 +103,7 @@ Wipe the clipboard automatically after a period of inactivity. Configure in the 
 - **AES-256-GCM** with Argon2id key derivation (t=2, m=64MB, p=4)
 - **HMAC-SHA256** on every message; tampered or injected messages are silently dropped
 - **Replay protection** — each message contains an 8-byte timestamp inside the AEAD envelope; messages outside a ±5-minute window are rejected
-- The Ably API key and all passphrases are stored in the **macOS Keychain** — never written to disk in config files
+- The Ably API key and all passphrases are stored in the **macOS Keychain** or **Windows Credential Manager** — never written to disk in config files
 
 ## License
 
