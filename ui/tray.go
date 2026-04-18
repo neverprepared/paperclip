@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -45,6 +46,10 @@ type trayState struct {
 	r           *relay.Relay
 	menuCancel  context.CancelFunc
 	clearCancel context.CancelFunc
+
+	// restartMu serializes concurrent restart calls so that two menu-event
+	// goroutines cannot race to stop/start the relay at the same time.
+	restartMu sync.Mutex
 }
 
 func (s *trayState) relay() *relay.Relay {
@@ -54,13 +59,22 @@ func (s *trayState) relay() *relay.Relay {
 }
 
 // restart stops the current relay and starts a fresh one from the factory.
+// It is safe to call from multiple goroutines concurrently: restartMu ensures
+// only one restart runs at a time so the old relay is never double-stopped
+// and the new relay is never silently overwritten.
 func (s *trayState) restart() {
+	s.restartMu.Lock()
+	defer s.restartMu.Unlock()
+
+	// Capture and clear the old relay atomically so any concurrent caller that
+	// races past the restartMu (shouldn't happen, belt-and-suspenders) sees nil.
 	s.mu.Lock()
 	old := s.r
+	s.r = nil
 	s.mu.Unlock()
 
 	if old != nil {
-		old.Stop()
+		old.Stop() // blocks until the poller goroutine exits; safe to call outside s.mu
 	}
 
 	r := s.newRelay()
@@ -107,7 +121,9 @@ func (s *trayState) startClearTimer(seconds int) {
 					lastChanged = time.Now()
 					cleared = false
 				} else if !cleared && current != "" && time.Since(lastChanged) >= time.Duration(seconds)*time.Second {
-					_ = s.cb.Write(&clipboard.Content{Type: clipboard.TypeText, Data: []byte{}})
+					if err := s.cb.Write(&clipboard.Content{Type: clipboard.TypeText, Data: []byte{}}); err != nil {
+						log.Printf("[paperclip] auto-clear: failed to write clipboard: %v", err)
+					}
 					cleared = true
 				}
 			}

@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -37,6 +38,21 @@ type Config struct {
 	IsHub             bool        `json:"is_hub"`
 	HubTargets        []string    `json:"hub_targets"` // empty = broadcast to all; only used when IsHub=true
 	Relay             RelayConfig `json:"relay"`
+}
+
+// Validate checks the configuration for semantic errors that would cause a
+// runtime panic or silent misbehaviour.  It is called automatically by
+// LoadFrom after successful JSON unmarshalling.
+func (cfg *Config) Validate() error {
+	if cfg.PollMs <= 0 {
+		return fmt.Errorf("poll_ms must be positive (got %d); check your config file", cfg.PollMs)
+	}
+	for i, cb := range cfg.Relay.Clipboards {
+		if cb.Name == "" {
+			return fmt.Errorf("relay.clipboards[%d] has an empty name", i)
+		}
+	}
+	return nil
 }
 
 // DefaultConfig returns sensible defaults
@@ -93,6 +109,9 @@ func LoadFrom(path string) (*Config, error) {
 	cfg := DefaultConfig()
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return DefaultConfig(), err
+	}
+	if err := cfg.Validate(); err != nil {
+		return DefaultConfig(), fmt.Errorf("invalid config: %w", err)
 	}
 	return cfg, nil
 }

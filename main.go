@@ -44,6 +44,12 @@ func main() {
 		cfg.Verbose = true
 	}
 
+	// Re-validate after CLI flag overrides: a flag like --poll=-1 could produce
+	// an invalid value that wasn't present in the config file.
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
+
 	// Resolve Ably API key: keychain → env var (for CI/scripting).
 	apiKey, keychainErr := relay.GetAPIKey()
 	if keychainErr != nil {
@@ -91,6 +97,7 @@ func startRelay(cfg *config.Config, apiKey string, cb *clipboard.Clipboard, logg
 
 	if err := r.Start(cfg.PollMs); err != nil {
 		logger.Printf("Failed to start relay: %v", err)
+		r.Stop() // close the Ably connection; Start may have left partial subscriptions
 		return nil
 	}
 

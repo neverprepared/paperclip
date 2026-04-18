@@ -178,3 +178,58 @@ func TestLoadFromPartialJSONUsesDefaults(t *testing.T) {
 		t.Error("expected Verbose=false (default), got true")
 	}
 }
+
+// --- Validate() tests ---
+
+func TestValidate_ValidConfig(t *testing.T) {
+	cfg := DefaultConfig() // PollMs=500
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("expected valid default config to pass Validate, got: %v", err)
+	}
+}
+
+func TestValidate_ZeroPollMs_ReturnsError(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.PollMs = 0
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected Validate to return error for poll_ms=0, got nil")
+	}
+}
+
+func TestValidate_NegativePollMs_ReturnsError(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.PollMs = -100
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected Validate to return error for poll_ms=-100, got nil")
+	}
+}
+
+func TestValidate_EmptyClipboardName_ReturnsError(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Relay.Clipboards = []Clipboard{{Name: "", Enabled: true}}
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected Validate to return error for empty clipboard name, got nil")
+	}
+}
+
+func TestLoadFromZeroPollMs_ReturnsDefaultAndError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	// A config file with poll_ms=0 is semantically invalid.
+	if err := os.WriteFile(path, []byte(`{"poll_ms": 0}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(path)
+	if err == nil {
+		t.Error("expected LoadFrom to return error for poll_ms=0, got nil")
+	}
+	// Even on validation failure the returned config must be usable (defaults).
+	if cfg == nil {
+		t.Fatal("expected non-nil config even on validation error")
+	}
+	if cfg.PollMs != 500 {
+		t.Errorf("expected default PollMs=500 on invalid poll_ms, got %d", cfg.PollMs)
+	}
+}
