@@ -19,7 +19,21 @@ import (
 	"github.com/mindmorass/paperclip/clipboard"
 )
 
-const replayWindowSeconds = 5 * 60 // ±5 minutes
+const (
+	replayWindowSeconds = 5 * 60 // ±5 minutes
+
+	// ablyMessageSizeLimit is the hard maximum message size enforced by Ably.
+	// Payloads larger than this are silently dropped by the broker.
+	ablyMessageSizeLimit = 64 * 1024 // 64 KB
+
+	// maxPlaintextBytes is the largest plaintext that can be published and still
+	// fit within ablyMessageSizeLimit after:
+	//   encrypt: +12-byte nonce +16-byte GCM tag +8-byte timestamp = +36 bytes
+	//   base64:  *4/3
+	//   JSON envelope (t, d, s, m fields): ~200 bytes overhead
+	// Conservative limit: 47 KB leaves ~1 KB headroom.
+	maxPlaintextBytes = 47 * 1024
+)
 
 // ClipboardStatus represents the state of a single relay room.
 type ClipboardStatus struct {
@@ -60,6 +74,7 @@ type Relay struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	stopChan chan struct{}
+	stopOnce sync.Once
 	wg       sync.WaitGroup
 
 	syncMu     sync.Mutex
@@ -117,7 +132,9 @@ type roomSub struct {
 // New creates a new Ably relay connected to multiple rooms.
 // All rooms must have a passphrase in the system keychain — rooms without one
 // are skipped. Returns an error if no rooms have passphrases.
-func New(apiKey string, roomNames []string, cb *clipboard.Clipboard, logger *log.Logger, verbose bool) (*Relay, error) {
+// cb accepts any clipboardSyncer implementation; pass a *clipboard.Clipboard
+// for production use or a test double in unit tests.
+func New(apiKey string, roomNames []string, cb clipboardSyncer, logger *log.Logger, verbose bool) (*Relay, error) {
 	if verbose {
 		logger.Printf("Ably key: [configured]")
 		logger.Printf("Ably clipboards: %v", roomNames)
@@ -143,8 +160,13 @@ func New(apiKey string, roomNames []string, cb *clipboard.Clipboard, logger *log
 			room.encKey = deriveKey(passphrase, name)
 			logger.Printf("Encryption enabled for clipboard '%s'", name)
 			rooms = append(rooms, room)
+		} else if err != nil {
+			// Distinguish a keychain access failure (locked keychain, permission
+			// denied, etc.) from a genuinely unconfigured passphrase so users can
+			// diagnose the problem.
+			logger.Printf("WARNING: keychain error reading passphrase for clipboard '%s': %v — skipping (unlock your keychain or re-enter the passphrase via the tray)", name, err)
 		} else {
-			logger.Printf("WARNING: No passphrase for clipboard '%s' — skipping (encryption is required)", name)
+			logger.Printf("WARNING: empty passphrase for clipboard '%s' — skipping (set a passphrase via the tray)", name)
 		}
 	}
 
@@ -176,13 +198,23 @@ func New(apiKey string, roomNames []string, cb *clipboard.Clipboard, logger *log
 }
 
 // Start begins subscribing to all rooms and publishing clipboard changes.
+// Returns an error if pollMs is not positive or if any Ably subscription fails.
+// On failure the relay context is cancelled to clean up any partially-established
+// subscriptions; callers should not use the Relay after Start returns an error.
 func (r *Relay) Start(pollMs int) error {
+	if pollMs <= 0 {
+		return fmt.Errorf("poll interval must be positive, got %d ms", pollMs)
+	}
+
 	for _, room := range r.rooms {
 		rm := room // capture for closure
 		_, err := room.channel.SubscribeAll(r.ctx, func(msg *ably.Message) {
 			r.handleMessage(rm, msg)
 		})
 		if err != nil {
+			// Cancel the context to tear down any subscriptions already established
+			// for earlier rooms in this loop, preventing a goroutine leak.
+			r.cancel()
 			return fmt.Errorf("failed to subscribe to clipboard %s: %w", room.name, err)
 		}
 		r.logger.Printf("Ably relay connected (clipboard: %s)", room.name)
@@ -195,11 +227,14 @@ func (r *Relay) Start(pollMs int) error {
 }
 
 // Stop shuts down the relay and waits for background goroutines to exit.
+// Safe to call multiple times; subsequent calls are no-ops.
 func (r *Relay) Stop() {
-	r.cancel()
-	close(r.stopChan)
-	r.wg.Wait()
-	r.client.Close()
+	r.stopOnce.Do(func() {
+		r.cancel()
+		close(r.stopChan)
+		r.wg.Wait()
+		r.client.Close()
+	})
 }
 
 // Connected returns whether the Ably connection is active.
@@ -344,6 +379,14 @@ func (r *Relay) pollAndPublish(interval time.Duration) {
 					continue
 				}
 
+				// Enforce Ably's 64 KB message limit early, before doing
+				// encryption work.  base64(nonce+ts+data+gcm) + JSON overhead
+				// means the usable plaintext limit is ~47 KB.
+				if len(content.Data) > maxPlaintextBytes {
+					r.logger.Printf("WARNING: clipboard payload too large for clipboard '%s' (%d bytes, limit %d) — dropping", room.name, len(content.Data), maxPlaintextBytes)
+					continue
+				}
+
 				// Prepend 8-byte big-endian Unix timestamp inside the
 				// AEAD envelope so receivers can reject replayed messages.
 				ts := make([]byte, 8)
@@ -367,6 +410,15 @@ func (r *Relay) pollAndPublish(interval time.Duration) {
 				msgJSON, err := json.Marshal(amsg)
 				if err != nil {
 					r.logger.Printf("Failed to marshal message for clipboard '%s': %v", room.name, err)
+					continue
+				}
+
+				// Final wire-size safety net: the serialised JSON must fit within
+				// Ably's hard limit.  Under normal circumstances the plaintext
+				// guard above prevents reaching here with an oversized payload;
+				// this catches any unexpected overhead (e.g. very long room names).
+				if len(msgJSON) > ablyMessageSizeLimit {
+					r.logger.Printf("WARNING: serialised message too large for clipboard '%s' (%d bytes, Ably limit %d) — dropping", room.name, len(msgJSON), ablyMessageSizeLimit)
 					continue
 				}
 
