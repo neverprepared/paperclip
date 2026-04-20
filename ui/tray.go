@@ -578,33 +578,21 @@ func (s *trayState) build() {
 					continue
 				}
 
+				mCheckUpdate.SetTitle("  Check for Update...")
+				mCheckUpdate.Enable()
+
 				if !update.IsNewer(s.version, rel.Version) {
-					mCheckUpdate.SetTitle("  Check for Update...")
-					mCheckUpdate.Enable()
 					promptConfirm("Up to Date", fmt.Sprintf("You're running the latest version (v%s).", s.version))
 					continue
 				}
 
-				if !promptConfirm("Update Available", fmt.Sprintf("Version %s is available (you have %s).\n\nDownload it now?", rel.Version, s.version)) {
-					mCheckUpdate.SetTitle("  Check for Update...")
-					mCheckUpdate.Enable()
+				if !promptConfirm("Update Available", fmt.Sprintf("Version %s is available (you have %s).\n\nOpen the release page?", rel.Version, s.version)) {
 					continue
 				}
 
-				mCheckUpdate.SetTitle("  Downloading...")
-				dlCtx, dlCancel := context.WithTimeout(context.Background(), 120*time.Second)
-				path, err := update.Download(dlCtx, rel, s.version)
-				dlCancel()
-
-				mCheckUpdate.SetTitle("  Check for Update...")
-				mCheckUpdate.Enable()
-
-				if err != nil {
-					promptConfirm("Download Failed", err.Error())
-					continue
+				if err := update.OpenBrowser(rel.URL); err != nil {
+					promptConfirm("Error", fmt.Sprintf("Could not open browser: %v", err))
 				}
-
-				promptConfirm("Download Complete", fmt.Sprintf("Saved to:\n%s\n\nReplace the running binary with this file and restart Paperclip.", path))
 			}
 		}
 	}()
