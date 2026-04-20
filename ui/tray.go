@@ -16,6 +16,7 @@ import (
 	"github.com/mindmorass/paperclip/clipboard"
 	"github.com/mindmorass/paperclip/config"
 	"github.com/mindmorass/paperclip/relay"
+	"github.com/mindmorass/paperclip/update"
 )
 
 var validRoomName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
@@ -23,12 +24,13 @@ var validRoomName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 // Run starts the systray menu bar UI and blocks until quit.
 // newRelay is called to create (or recreate) the relay whenever config changes.
 // cb is used by the auto-clear timer to wipe the clipboard after inactivity.
-func Run(cfg *config.Config, cb *clipboard.Clipboard, newRelay func() *relay.Relay, onQuit func()) {
+func Run(cfg *config.Config, cb *clipboard.Clipboard, newRelay func() *relay.Relay, onQuit func(), version string) {
 	s := &trayState{
 		cfg:      cfg,
 		cb:       cb,
 		newRelay: newRelay,
 		onQuit:   onQuit,
+		version:  version,
 	}
 	s.r = newRelay()
 	s.startClearTimer(cfg.ClearAfterSeconds)
@@ -50,6 +52,8 @@ type trayState struct {
 	// restartMu serializes concurrent restart calls so that two menu-event
 	// goroutines cannot race to stop/start the relay at the same time.
 	restartMu sync.Mutex
+
+	version string
 }
 
 func (s *trayState) relay() *relay.Relay {
@@ -267,6 +271,7 @@ func (s *trayState) build() {
 	systray.AddSeparator()
 	mAddRoom := systray.AddMenuItem("  Add Clipboard...", "Add a new sync clipboard")
 	mSetKey := systray.AddMenuItem("  Set API Key...", "Update your Ably API key")
+	mCheckUpdate := systray.AddMenuItem("  Check for Update...", "Download the latest version")
 
 	systray.AddSeparator()
 
@@ -545,6 +550,61 @@ func (s *trayState) build() {
 				s.restart()
 				s.build()
 				return
+			}
+		}
+	}()
+
+	// Check for update
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case _, ok := <-mCheckUpdate.ClickedCh:
+				if !ok {
+					return
+				}
+				mCheckUpdate.Disable()
+				mCheckUpdate.SetTitle("  Checking...")
+
+				checkCtx, checkCancel := context.WithTimeout(context.Background(), 15*time.Second)
+				rel, err := update.LatestRelease(checkCtx, s.version)
+				checkCancel()
+
+				if err != nil {
+					mCheckUpdate.SetTitle("  Check for Update...")
+					mCheckUpdate.Enable()
+					promptConfirm("Update Check Failed", err.Error())
+					continue
+				}
+
+				if !update.IsNewer(s.version, rel.Version) {
+					mCheckUpdate.SetTitle("  Check for Update...")
+					mCheckUpdate.Enable()
+					promptConfirm("Up to Date", fmt.Sprintf("You're running the latest version (v%s).", s.version))
+					continue
+				}
+
+				if !promptConfirm("Update Available", fmt.Sprintf("Version %s is available (you have %s).\n\nDownload it now?", rel.Version, s.version)) {
+					mCheckUpdate.SetTitle("  Check for Update...")
+					mCheckUpdate.Enable()
+					continue
+				}
+
+				mCheckUpdate.SetTitle("  Downloading...")
+				dlCtx, dlCancel := context.WithTimeout(context.Background(), 120*time.Second)
+				path, err := update.Download(dlCtx, rel, s.version)
+				dlCancel()
+
+				mCheckUpdate.SetTitle("  Check for Update...")
+				mCheckUpdate.Enable()
+
+				if err != nil {
+					promptConfirm("Download Failed", err.Error())
+					continue
+				}
+
+				promptConfirm("Download Complete", fmt.Sprintf("Saved to:\n%s\n\nReplace the running binary with this file and restart Paperclip.", path))
 			}
 		}
 	}()
