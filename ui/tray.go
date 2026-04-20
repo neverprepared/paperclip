@@ -155,6 +155,8 @@ func (s *trayState) build() {
 	systray.SetTooltip(s.tooltipText(r))
 
 	// ── Status ───────────────────────────────────────────────────────────
+	mVersion := systray.AddMenuItem(fmt.Sprintf("  Paperclip v%s", s.version), "")
+	mVersion.Disable()
 	mStatus := systray.AddMenuItem(s.statusText(r), "")
 	mStatus.Disable()
 
@@ -331,8 +333,6 @@ func (s *trayState) build() {
 	mLogin := systray.AddMenuItemCheckbox("Start at Login", "Launch Paperclip automatically at login", isLaunchAgentInstalled())
 
 	systray.AddSeparator()
-	mVersion := systray.AddMenuItem(fmt.Sprintf("  Paperclip v%s", s.version), "")
-	mVersion.Disable()
 	mQuit := systray.AddMenuItem("Quit Paperclip", "")
 
 	// ── Event goroutines ──────────────────────────────────────────────────
