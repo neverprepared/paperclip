@@ -287,7 +287,7 @@ func (r *Relay) handleMessage(room *roomSub, msg *ably.Message) {
 		return
 	}
 	if !verifyMAC(room.encKey, amsg) {
-		r.logger.Printf("HMAC verification failed for clipboard '%s' — dropping message", room.name)
+		r.logger.Printf("HMAC verification failed for clipboard '%s' (sender %s) — dropping message", room.name, amsg.Sender)
 		return
 	}
 
