@@ -31,9 +31,11 @@ func Run(cfg *config.Config, cb *clipboard.Clipboard, newRelay func() *relay.Rel
 		newRelay: newRelay,
 		onQuit:   onQuit,
 		version:  version,
+		jiggler:  &Jiggler{},
 	}
 	s.r = newRelay()
 	s.startClearTimer(cfg.ClearAfterSeconds)
+	s.jiggler.Start(cfg.JiggleMode)
 
 	systray.Run(func() { s.build() }, func() {})
 }
@@ -54,6 +56,7 @@ type trayState struct {
 	restartMu sync.Mutex
 
 	version string
+	jiggler *Jiggler
 }
 
 func (s *trayState) relay() *relay.Relay {
@@ -330,6 +333,31 @@ func (s *trayState) build() {
 		clearSubs = append(clearSubs, sub)
 	}
 
+	// ── Mouse Jiggler submenu ─────────────────────────────────────────────
+	jiggleModes := []struct {
+		label string
+		mode  string
+	}{
+		{"Off", ""},
+		{"Minimal", "minimal"},
+		{"Natural", "natural"},
+	}
+	jiggleLabel := "Mouse Jiggler: Off"
+	for _, jm := range jiggleModes {
+		if jm.mode == cfg.JiggleMode {
+			jiggleLabel = fmt.Sprintf("Mouse Jiggler: %s", jm.label)
+		}
+	}
+	mJiggle := systray.AddMenuItem(jiggleLabel, "Move mouse to prevent screen sleep")
+	var jiggleSubs []*systray.MenuItem
+	for _, jm := range jiggleModes {
+		sub := mJiggle.AddSubMenuItem(jm.label, "")
+		if jm.mode == cfg.JiggleMode {
+			sub.Check()
+		}
+		jiggleSubs = append(jiggleSubs, sub)
+	}
+
 	mLogin := systray.AddMenuItemCheckbox("Start at Login", "Launch Paperclip automatically at login", isLaunchAgentInstalled())
 
 	systray.AddSeparator()
@@ -599,6 +627,35 @@ func (s *trayState) build() {
 		}
 	}()
 
+	// Mouse Jiggler options
+	for i, sub := range jiggleSubs {
+		i, sub := i, sub
+		jm := jiggleModes[i]
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case _, ok := <-sub.ClickedCh:
+					if !ok {
+						return
+					}
+					cfg.JiggleMode = jm.mode
+					if err := config.Save(cfg); err != nil {
+						promptConfirm("Error", fmt.Sprintf("Failed to save config: %v", err))
+						continue
+					}
+					s.jiggler.Stop()
+					if jm.mode != "" {
+						s.jiggler.Start(jm.mode)
+					}
+					s.build()
+					return
+				}
+			}
+		}()
+	}
+
 	// Auto-clear options
 	for i, sub := range clearSubs {
 		i, sub := i, sub
@@ -669,6 +726,7 @@ func (s *trayState) build() {
 			if s.onQuit != nil {
 				s.onQuit()
 			}
+			s.jiggler.Stop()
 			if r := s.relay(); r != nil {
 				r.Stop()
 			}
