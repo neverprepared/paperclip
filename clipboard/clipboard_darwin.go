@@ -59,13 +59,51 @@ func (c *Clipboard) Write(content *Content) error {
 }
 
 func (c *Clipboard) readText() ([]byte, error) {
-	cmd := exec.Command("pbpaste")
-	return cmd.Output()
+	// Read text via NSPasteboard → UTF-8 → base64 to avoid pbpaste
+	// encoding/normalization issues (locale-dependent, line-ending
+	// conversion, Unicode normalization).
+	script := `use framework "AppKit"
+use framework "Foundation"
+use scripting additions
+
+set theClipboard to current application's NSPasteboard's generalPasteboard()
+set theString to theClipboard's stringForType:(current application's NSPasteboardTypeString)
+if theString is missing value then
+    error "No text"
+end if
+set nsData to theString's dataUsingEncoding:(current application's NSUTF8StringEncoding)
+return (nsData's base64EncodedStringWithOptions:0) as text`
+
+	cmd := exec.Command("osascript", "-e", script)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	output = bytes.TrimSpace(output)
+	if len(output) == 0 {
+		return []byte{}, nil
+	}
+	return base64.StdEncoding.DecodeString(string(output))
 }
 
 func (c *Clipboard) writeText(data []byte) error {
-	cmd := exec.Command("pbcopy")
-	cmd.Stdin = bytes.NewReader(data)
+	// Write text via base64 → NSPasteboard to avoid pbcopy
+	// encoding/normalization issues.
+	encoded := base64.StdEncoding.EncodeToString(data)
+	script := fmt.Sprintf(`use framework "AppKit"
+use framework "Foundation"
+use scripting additions
+
+set b64Data to "%s"
+set nsData to current application's class "NSData"'s alloc()'s initWithBase64EncodedString:b64Data options:0
+set theString to current application's NSString's alloc()'s initWithData:nsData encoding:(current application's NSUTF8StringEncoding)
+set theClipboard to current application's NSPasteboard's generalPasteboard()
+theClipboard's clearContents()
+theClipboard's setString:theString forType:(current application's NSPasteboardTypeString)
+`, encoded)
+
+	cmd := exec.Command("osascript", "-e", script)
 	return cmd.Run()
 }
 
