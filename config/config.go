@@ -35,6 +35,7 @@ type Config struct {
 	PollMs            int         `json:"poll_ms"`
 	Verbose           bool        `json:"verbose"`
 	ClearAfterSeconds int         `json:"clear_after_seconds"` // 0 = disabled
+	JiggleMode        string      `json:"jiggle_mode"`         // "", "minimal", "natural"
 	IsHub             bool        `json:"is_hub"`
 	HubTargets        []string    `json:"hub_targets"` // empty = broadcast to all; only used when IsHub=true
 	Relay             RelayConfig `json:"relay"`
