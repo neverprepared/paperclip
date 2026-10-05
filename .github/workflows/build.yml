@@ -82,6 +82,7 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 7
           name: paperclip-darwin-${{ matrix.goarch }}
           path: paperclip
 
@@ -119,6 +120,7 @@ jobs:
       - name: Upload daemon artifact
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 7
           name: paperclip-windows-${{ matrix.goarch }}
           path: paperclip.exe
 
@@ -126,6 +128,7 @@ jobs:
         if: matrix.goarch == 'amd64'
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 7
           name: paperclip-windows-tray-amd64
           path: paperclip-tray.exe
 
